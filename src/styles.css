@@ -1,0 +1,567 @@
+:root {
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: #1f2a36;
+  background: #f4f7fb;
+  line-height: 1.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top left, #ddeaff 0%, #f5f8ff 48%, #f7f3ed 100%);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+.app-shell {
+  width: min(1280px, 96vw);
+  margin: 24px auto;
+  display: grid;
+  gap: 16px;
+}
+
+.topbar {
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: #0f4a7a;
+  color: #ffffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.topbar-authenticated {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 16px;
+}
+
+.topbar h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.timestamp {
+  font-size: 0.9rem;
+  opacity: 0.95;
+}
+
+.backup-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.upload-label {
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: #e6eef7;
+  color: #1f2f40;
+  font-weight: 600;
+}
+
+.upload-label input {
+  display: none;
+}
+
+.banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+}
+
+.banner.warning {
+  background: #fff4d9;
+  border: 1px solid #f0cf76;
+}
+
+.banner.info {
+  background: #e9f3ff;
+  border: 1px solid #abcaf0;
+}
+
+.banner.error {
+  background: #ffe5e5;
+  border: 1px solid #dc7a7a;
+}
+
+.banner.success {
+  background: #e6f7eb;
+  border: 1px solid #81c995;
+}
+
+.landing-shell,
+.auth-shell,
+.status-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.landing-card,
+.auth-card {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d9e4f0;
+  border-radius: 20px;
+  padding: 28px;
+  box-shadow: 0 20px 50px rgba(16, 54, 94, 0.12);
+}
+
+.landing-card h1,
+.auth-card h1 {
+  font-size: 2rem;
+  color: #10365b;
+}
+
+.auth-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.user-meta {
+  margin-top: 4px;
+  font-size: 0.95rem;
+  opacity: 0.95;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d9e4f0;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 8px 28px rgba(16, 54, 94, 0.08);
+}
+
+.profiles-panel {
+  position: sticky;
+  top: 12px;
+}
+
+.profiles-panel h2 {
+  margin-bottom: 12px;
+}
+
+.create-inline {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.create-inline input {
+  width: 100%;
+}
+
+.profiles-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.profiles-list li {
+  border: 1px solid #d7e3f0;
+  border-radius: 10px;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  background: #fbfdff;
+}
+
+.profiles-list li.active {
+  border-color: #1f6fb4;
+  background: #eff7ff;
+}
+
+.profile-name {
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-weight: 600;
+  color: #17385a;
+  cursor: pointer;
+  padding: 0;
+}
+
+.actions-inline {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.edit-inline {
+  display: flex;
+  gap: 8px;
+}
+
+.edit-inline input {
+  width: 100%;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: #1f6fb4;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+button:hover {
+  filter: brightness(0.95);
+}
+
+button.neutral {
+  background: #e6eef7;
+  color: #1f2f40;
+}
+
+button.danger {
+  background: #c03f4d;
+}
+
+.main-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  border: 1px solid #d6e3f1;
+  border-radius: 12px;
+  padding: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f6fbff 100%);
+}
+
+.metric {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-top: 6px;
+  color: #10365b;
+}
+
+.annual-block {
+  display: grid;
+  gap: 10px;
+}
+
+.annual-list {
+  display: grid;
+  gap: 8px;
+}
+
+.annual-item {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid #d8e3ef;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.below-overall-block {
+  display: grid;
+  gap: 8px;
+}
+
+.below-overall-block h4 {
+  margin-top: 8px;
+}
+
+.insight-table-wrap {
+  overflow-x: auto;
+}
+
+.worst-semester-filter {
+  display: grid;
+  gap: 8px;
+}
+
+.worst-semester-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.worst-semester-option {
+  border: 1px solid #d7e3f0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #f9fcff;
+}
+
+.insight-table-wrap tr.year-row-tone-1 td {
+  background: #f1f7ff;
+}
+
+.insight-table-wrap tr.year-row-tone-2 td {
+  background: #edf9f3;
+}
+
+.insight-table-wrap tr.year-row-tone-3 td {
+  background: #fff7ec;
+}
+
+.insight-table-wrap tr.year-row-tone-4 td {
+  background: #faf1ff;
+}
+
+.insight-table-wrap tr.year-row-tone-5 td {
+  background: #fff2f4;
+}
+
+.insight-table-wrap tr.year-row-tone-6 td {
+  background: #eff9fb;
+}
+
+.below-overall-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: #1f2f40;
+}
+
+.semester-create,
+.course-create {
+  display: grid;
+  gap: 8px;
+}
+
+.semester-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.row-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.row-fields.compact {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.92rem;
+  color: #30465d;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #bfd0e2;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+input:disabled {
+  background: #f1f3f6;
+}
+
+.semesters-list {
+  display: grid;
+  gap: 14px;
+}
+
+.semester-card {
+  border: 1px solid #d6e2ef;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  background: #fcfeff;
+}
+
+.semester-card.year-tone-1 {
+  border-color: #8fb8e8;
+  background: #f1f7ff;
+}
+
+.semester-card.year-tone-2 {
+  border-color: #8fd5b3;
+  background: #edf9f3;
+}
+
+.semester-card.year-tone-3 {
+  border-color: #e9c48d;
+  background: #fff7ec;
+}
+
+.semester-card.year-tone-4 {
+  border-color: #d9a1e2;
+  background: #faf1ff;
+}
+
+.semester-card.year-tone-5 {
+  border-color: #e59ea7;
+  background: #fff2f4;
+}
+
+.semester-card.year-tone-6 {
+  border-color: #98cfd9;
+  background: #eff9fb;
+}
+
+.semester-body {
+  display: grid;
+  gap: 12px;
+}
+
+.semester-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gpa-pill {
+  background: #e9f3ff;
+  color: #0f3e6c;
+  border: 1px solid #b7d3ef;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 700;
+}
+
+.courses-table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e2eaf3;
+  text-align: left;
+  padding: 8px;
+  vertical-align: top;
+}
+
+th {
+  color: #32506f;
+  font-weight: 700;
+}
+
+.muted {
+  color: #60758b;
+}
+
+.center {
+  text-align: center;
+}
+
+.empty {
+  border: 1px dashed #b8cadc;
+  border-radius: 10px;
+  padding: 24px;
+  text-align: center;
+  color: #4f647a;
+}
+
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .profiles-panel {
+    position: static;
+  }
+
+  .row-fields,
+  .row-fields.compact {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .topbar-authenticated {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+  }
+
+  .topbar {
+    border-radius: 10px;
+    display: grid;
+    gap: 6px;
+  }
+
+  .backup-tools {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .row-fields,
+  .row-fields.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .semester-card header {
+    align-items: flex-start;
+  }
+}
