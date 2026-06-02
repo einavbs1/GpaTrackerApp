@@ -1,8 +1,12 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
+  AuthCredential,
+  GoogleAuthProvider,
   User,
   createUserWithEmailAndPassword,
+  fetchSignInMethodsForEmail,
+  linkWithCredential,
   onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
@@ -146,6 +150,8 @@ export default function App() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [pendingGoogleCredential, setPendingGoogleCredential] = useState<AuthCredential | null>(null);
+  const [pendingGoogleEmail, setPendingGoogleEmail] = useState<string | null>(null);
 
   const previousSerializedRef = useRef<string>("");
   const hasLoadedUserStateRef = useRef(false);
@@ -321,9 +327,42 @@ export default function App() {
   async function handleSignIn() {
     try {
       setAuthError(null);
+      setImportSuccess(null);
       googleProvider.setCustomParameters({ prompt: "select_account" });
       await signInWithPopup(auth, googleProvider);
     } catch (error) {
+      const maybeCode =
+        typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+
+      if (maybeCode === "auth/account-exists-with-different-credential") {
+        const pendingCredential = GoogleAuthProvider.credentialFromError(error);
+        const emailFromError =
+          typeof error === "object" && error !== null && "customData" in error
+            ? String(((error as { customData?: { email?: string } }).customData?.email ?? ""))
+            : "";
+        const normalizedEmail = emailFromError.trim().toLowerCase();
+
+        if (pendingCredential && normalizedEmail) {
+          const methods = await fetchSignInMethodsForEmail(auth, normalizedEmail);
+
+          setPendingGoogleCredential(pendingCredential);
+          setPendingGoogleEmail(normalizedEmail);
+          setEmail(normalizedEmail);
+          setPassword("");
+          setAuthMode("signin");
+
+          if (methods.includes("password")) {
+            setAuthError("This email already has a password account. Sign in with your password once to link Google.");
+            return;
+          }
+
+          if (methods.length > 0) {
+            setAuthError(`This email already exists with: ${methods.join(", ")}. Sign in with that method first, then try Google again.`);
+            return;
+          }
+        }
+      }
+
       const message = error instanceof Error ? error.message : "Unknown Google sign-in error.";
       setAuthError(`Google Sign-In failed: ${message}`);
     }
@@ -332,7 +371,28 @@ export default function App() {
   async function handleEmailSignIn() {
     try {
       setAuthError(null);
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      const normalizedEmail = email.trim().toLowerCase();
+      const userCredential = await signInWithEmailAndPassword(auth, normalizedEmail, password);
+
+      if (pendingGoogleCredential && pendingGoogleEmail && userCredential.user.email?.toLowerCase() === pendingGoogleEmail) {
+        try {
+          await linkWithCredential(userCredential.user, pendingGoogleCredential);
+          setImportSuccess("Google sign-in linked to your existing email account.");
+        } catch (linkError) {
+          const linkCode =
+            typeof linkError === "object" && linkError !== null && "code" in linkError
+              ? String((linkError as { code: unknown }).code)
+              : "";
+
+          if (linkCode !== "auth/provider-already-linked") {
+            const message = linkError instanceof Error ? linkError.message : "Unknown account-linking error.";
+            setAuthError(`Signed in, but Google linking failed: ${message}`);
+          }
+        } finally {
+          setPendingGoogleCredential(null);
+          setPendingGoogleEmail(null);
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown email sign-in error.";
       setAuthError(`Email sign-in failed: ${message}`);
