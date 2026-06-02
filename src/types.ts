@@ -24,6 +24,7 @@ export interface Profile {
 
 export interface AppState {
   lastModified: number;
+  theme: "dark" | "light";
   profiles: Profile[];
   activeProfileId: string | null;
 }
@@ -39,6 +40,7 @@ export function createEmptyState(): AppState {
 
   return {
     lastModified: Date.now(),
+    theme: "light",
     profiles: [defaultProfile],
     activeProfileId: defaultProfile.id
   };

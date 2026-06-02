@@ -57,6 +57,7 @@ const EMPTY_SEMESTER_DRAFT: SemesterDraft = {
 };
 
 const REMEMBERED_EMAIL_KEY = "gpa_tracker_remembered_email";
+const THEME_KEY = "gpa_tracker_theme";
 
 function getNextSeason(season: SemesterSeason): SemesterSeason {
   if (season === "Winter A") return "Spring B";
@@ -119,6 +120,10 @@ function parseCourseDraft(draft: CourseDraft): Omit<Course, "id"> | null {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const saved = localStorage.getItem(THEME_KEY);
+    return saved === "dark" ? "dark" : "light";
+  });
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
@@ -155,6 +160,18 @@ export default function App() {
 
   const previousSerializedRef = useRef<string>("");
   const hasLoadedUserStateRef = useRef(false);
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  function handleThemeSwitchChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextTheme = event.target.checked ? "dark" : "light";
+    setTheme(nextTheme);
+    if (user) {
+      setMutatingState((prev) => (prev.theme === nextTheme ? prev : { ...prev, theme: nextTheme }));
+    }
+  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
@@ -179,11 +196,13 @@ export default function App() {
         previousSerializedRef.current = JSON.stringify(normalized);
         hasLoadedUserStateRef.current = true;
         setState(normalized);
+        setTheme(normalized.theme);
       } catch (_error) {
         const fallback = buildDefaultState();
         previousSerializedRef.current = JSON.stringify(fallback);
         hasLoadedUserStateRef.current = true;
         setState(fallback);
+        setTheme(fallback.theme);
         setLoadError("Failed to load your Firestore document. A default profile was initialized.");
       } finally {
         setDataLoading(false);
@@ -363,8 +382,14 @@ export default function App() {
         }
       }
 
-      const message = error instanceof Error ? error.message : "Unknown Google sign-in error.";
-      setAuthError(`Google Sign-In failed: ${message}`);
+      const code2 = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+      const googleMessages: Record<string, string> = {
+        "auth/popup-closed-by-user": "Sign-in window was closed. Please try again.",
+        "auth/cancelled-popup-request": "Sign-in was cancelled. Please try again.",
+        "auth/popup-blocked": "Pop-up was blocked by your browser. Please allow pop-ups and try again.",
+        "auth/too-many-requests": "Too many attempts. Please wait a moment and try again.",
+      };
+      setAuthError(googleMessages[code2] ?? (error instanceof Error ? error.message : "Google sign-in failed. Please try again."));
     }
   }
 
@@ -394,8 +419,16 @@ export default function App() {
         }
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown email sign-in error.";
-      setAuthError(`Email sign-in failed: ${message}`);
+      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+      const friendlyMessages: Record<string, string> = {
+        "auth/invalid-credential": "Incorrect email or password. Please try again.",
+        "auth/user-not-found": "No account found with this email address.",
+        "auth/wrong-password": "Incorrect password. Please try again.",
+        "auth/too-many-requests": "Too many failed attempts. Please wait a moment and try again.",
+        "auth/user-disabled": "This account has been disabled. Please contact support.",
+        "auth/invalid-email": "Please enter a valid email address.",
+      };
+      setAuthError(friendlyMessages[code] ?? (error instanceof Error ? error.message : "Sign-in failed. Please try again."));
     }
   }
 
@@ -404,8 +437,14 @@ export default function App() {
       setAuthError(null);
       await createUserWithEmailAndPassword(auth, email.trim(), password);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown registration error.";
-      setAuthError(`Registration failed: ${message}`);
+      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+      const registerMessages: Record<string, string> = {
+        "auth/email-already-in-use": "An account with this email already exists. Try signing in instead.",
+        "auth/invalid-email": "Please enter a valid email address.",
+        "auth/weak-password": "Password must be at least 6 characters.",
+        "auth/too-many-requests": "Too many attempts. Please wait a moment and try again.",
+      };
+      setAuthError(registerMessages[code] ?? (error instanceof Error ? error.message : "Registration failed. Please try again."));
     }
   }
 
@@ -418,10 +457,15 @@ export default function App() {
         return;
       }
       await sendPasswordResetEmail(auth, email.trim());
-      setImportSuccess("Password reset email sent.");
+      setImportSuccess("Password reset email sent. Check your inbox.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown password reset error.";
-      setAuthError(`Password reset failed: ${message}`);
+      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+      const resetMessages: Record<string, string> = {
+        "auth/user-not-found": "No account found with this email address.",
+        "auth/invalid-email": "Please enter a valid email address.",
+        "auth/too-many-requests": "Too many attempts. Please wait a moment and try again.",
+      };
+      setAuthError(resetMessages[code] ?? (error instanceof Error ? error.message : "Password reset failed. Please try again."));
     }
   }
 
@@ -546,6 +590,7 @@ export default function App() {
       const normalized = normalizeState(parsed);
       previousSerializedRef.current = JSON.stringify(normalized);
       setState(normalized);
+      setTheme(normalized.theme);
 
       if (user) {
         await saveUserAppState(user.uid, normalized);
@@ -795,10 +840,13 @@ export default function App() {
   }
 
   function toggleSemesterCollapsed(semesterId: string) {
-    setCollapsedSemesterById((prev) => ({
-      ...prev,
-      [semesterId]: !prev[semesterId]
-    }));
+    setCollapsedSemesterById((prev) => {
+      const isCurrentlyCollapsed = prev[semesterId] ?? true;
+      return {
+        ...prev,
+        [semesterId]: !isCurrentlyCollapsed
+      };
+    });
   }
 
   function toggleWorstSemesterFilter(semesterId: string, checked: boolean) {
@@ -1004,80 +1052,172 @@ export default function App() {
     return (
       <div className="landing-shell">
         <section className="landing-card">
-          <h1>Degree GPA Calculator</h1>
-          <p>Sign in with Google or email to access your cloud-synced degree profiles, semesters, and GPA records.</p>
-          <div className="banner info">Firebase project: {firebaseProjectId}</div>
-          {firebaseInitError && <div className="banner error">Firebase init error: {firebaseInitError}</div>}
-          <div className="auth-tabs">
-            <button type="button" className={authMode === "signin" ? "neutral" : ""} onClick={() => setAuthMode("signin")}>
-              Sign In
-            </button>
-            <button type="button" className={authMode === "register" ? "neutral" : ""} onClick={() => setAuthMode("register")}>
-              Register
-            </button>
-            <button type="button" className={authMode === "reset" ? "neutral" : ""} onClick={() => setAuthMode("reset")}>
-              Reset Password
-            </button>
-          </div>
-          <div className="auth-form">
-            <label>
-              Email
-              <input
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
-              />
-            </label>
-            {authMode !== "reset" && (
-              <label>
-                Password
-                <input
-                  type="password"
-                  autoComplete={authMode === "register" ? "new-password" : "current-password"}
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Your password"
-                />
-              </label>
-            )}
-            <label className="checkbox-label">
+          <div className="landing-card-tools">
+            <label className="theme-switch theme-switch-landing" title="Toggle light/dark mode">
+              <span className="theme-switch-text">{theme === "dark" ? "Dark" : "Light"}</span>
               <input
                 type="checkbox"
-                checked={rememberEmail}
-                onChange={(event) => handleRememberEmailChange(event.target.checked)}
+                role="switch"
+                aria-label="Toggle light/dark mode"
+                checked={theme === "dark"}
+                onChange={handleThemeSwitchChange}
               />
-              Remember email on this device
+              <span className="theme-switch-track">
+                <span className="theme-switch-thumb" />
+              </span>
             </label>
           </div>
-          <div className="actions-inline">
-            {authMode === "signin" && (
-              <>
-                <button type="button" onClick={handleEmailSignIn}>
-                  Sign In With Email
+          <div className="landing-hero">
+            <div className="landing-icon">🎓</div>
+            <h1>Degree GPA Calculator</h1>
+            <p>Track your academic progress across semesters, profiles and years — synced to the cloud.</p>
+          </div>
+
+          {firebaseInitError && <div className="banner error">Firebase init error: {firebaseInitError}</div>}
+
+          {authMode === "signin" && (
+            <>
+              <button type="button" className="google-btn" onClick={handleSignIn}>
+                <svg className="google-icon" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                  <path fill="#EA4335" d="M24 9.5c3.15 0 5.64 1.08 7.54 2.84l5.62-5.62C33.72 3.58 29.22 1.5 24 1.5 14.82 1.5 7.06 7.1 3.72 14.96l6.55 5.09C12.02 14.02 17.56 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.5 24.5c0-1.64-.15-3.22-.42-4.75H24v9.01h12.64c-.55 2.93-2.2 5.41-4.68 7.08l7.18 5.58C43.44 37.3 46.5 31.38 46.5 24.5z"/>
+                  <path fill="#FBBC05" d="M10.27 28.05A14.53 14.53 0 0 1 9.5 24c0-1.41.24-2.77.65-4.05L3.6 14.86A22.93 22.93 0 0 0 1.5 24c0 3.27.68 6.38 1.9 9.2l6.87-5.15z"/>
+                  <path fill="#34A853" d="M24 46.5c5.22 0 9.6-1.72 12.8-4.68l-7.18-5.58c-1.73 1.16-3.95 1.84-5.62 1.84-6.44 0-11.98-4.52-13.73-10.55l-6.55 5.09C7.06 40.9 14.82 46.5 24 46.5z"/>
+                  <path fill="none" d="M0 0h48v48H0z"/>
+                </svg>
+                Continue with Google
+              </button>
+
+              <div className="auth-divider"><span>or sign in with email</span></div>
+
+              <div className="auth-form">
+                <label>
+                  Email
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </label>
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Your password"
+                  />
+                </label>
+                <div className="auth-row-split">
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={rememberEmail}
+                      onChange={(event) => handleRememberEmailChange(event.target.checked)}
+                    />
+                    Remember email
+                  </label>
+                  <button type="button" className="link-btn" onClick={() => setAuthMode("reset")}>
+                    Forgot password?
+                  </button>
+                </div>
+              </div>
+
+              <button type="button" className="primary-btn" onClick={handleEmailSignIn}>
+                Sign In
+              </button>
+
+              <p className="auth-switch">
+                Don't have an account?{" "}
+                <button type="button" className="link-btn" onClick={() => setAuthMode("register")}>
+                  Create one
                 </button>
-                <button type="button" className="neutral" onClick={handleSignIn}>
-                  Continue with Google
-                </button>
-              </>
-            )}
-            {authMode === "register" && (
-              <>
-                <button type="button" onClick={handleRegister}>
-                  Create Account
-                </button>
-                <button type="button" className="neutral" onClick={handleSignIn}>
-                  Use Google Instead
-                </button>
-              </>
-            )}
-            {authMode === "reset" && (
-              <button type="button" onClick={handleResetPassword}>
+              </p>
+            </>
+          )}
+
+          {authMode === "register" && (
+            <>
+              <button type="button" className="back-btn" onClick={() => setAuthMode("signin")}>
+                ← Back to Sign In
+              </button>
+
+              <button type="button" className="google-btn" onClick={handleSignIn}>
+                <svg className="google-icon" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                  <path fill="#EA4335" d="M24 9.5c3.15 0 5.64 1.08 7.54 2.84l5.62-5.62C33.72 3.58 29.22 1.5 24 1.5 14.82 1.5 7.06 7.1 3.72 14.96l6.55 5.09C12.02 14.02 17.56 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.5 24.5c0-1.64-.15-3.22-.42-4.75H24v9.01h12.64c-.55 2.93-2.2 5.41-4.68 7.08l7.18 5.58C43.44 37.3 46.5 31.38 46.5 24.5z"/>
+                  <path fill="#FBBC05" d="M10.27 28.05A14.53 14.53 0 0 1 9.5 24c0-1.41.24-2.77.65-4.05L3.6 14.86A22.93 22.93 0 0 0 1.5 24c0 3.27.68 6.38 1.9 9.2l6.87-5.15z"/>
+                  <path fill="#34A853" d="M24 46.5c5.22 0 9.6-1.72 12.8-4.68l-7.18-5.58c-1.73 1.16-3.95 1.84-5.62 1.84-6.44 0-11.98-4.52-13.73-10.55l-6.55 5.09C7.06 40.9 14.82 46.5 24 46.5z"/>
+                  <path fill="none" d="M0 0h48v48H0z"/>
+                </svg>
+                Sign Up with Google
+              </button>
+
+              <div className="auth-divider"><span>or create an account with email</span></div>
+
+              <div className="auth-form">
+                <label>
+                  Email
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </label>
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Create a password"
+                  />
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={rememberEmail}
+                    onChange={(event) => handleRememberEmailChange(event.target.checked)}
+                  />
+                  Remember email on this device
+                </label>
+              </div>
+
+              <button type="button" className="primary-btn" onClick={handleRegister}>
+                Create Account
+              </button>
+            </>
+          )}
+
+          {authMode === "reset" && (
+            <>
+              <button type="button" className="back-btn" onClick={() => setAuthMode("signin")}>
+                ← Back to Sign In
+              </button>
+              <div className="auth-form">
+                <label>
+                  Email
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </label>
+              </div>
+              <button type="button" className="primary-btn" onClick={handleResetPassword}>
                 Send Reset Link
               </button>
-            )}
-          </div>
+            </>
+          )}
+
           {authError && <div className="banner error">{authError}</div>}
         </section>
       </div>
@@ -1094,30 +1234,50 @@ export default function App() {
         <div>
           <h1>Degree GPA Calculator</h1>
           <div className="user-meta">Signed in as {user.displayName ?? user.email ?? user.uid}</div>
+          <div className="timestamp">Last modified: {new Date(state.lastModified).toLocaleString()}</div>
         </div>
         <div className="backup-tools">
           <button type="button" className="neutral" onClick={handleDownloadBackup}>
-            Download Backup (JSON)
+            <span aria-hidden="true">⬇️ </span>Download Backup (JSON)
           </button>
           <button type="button" className="neutral" onClick={handleExportExcel}>
-            Export To Excel
+            <span aria-hidden="true">📊 </span>Export To Excel
           </button>
           <label className="upload-label">
-            Upload Backup (JSON)
+            <span aria-hidden="true">⬆️ </span>Upload Backup (JSON)
             <input type="file" accept=".json,application/json" onChange={handleUploadBackup} />
           </label>
-          <button type="button" className="neutral" onClick={handleSignOutUser}>
+          <button type="button" className="danger" onClick={handleSignOutUser}>
+            <span className="action-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.41A7 7 0 1 1 7.6 6.6L6.17 5.17a9 9 0 1 0 11.66 0z"
+                />
+              </svg>
+            </span>
             Sign Out
           </button>
+          <label className="theme-switch theme-switch-topbar" title="Toggle light/dark mode">
+            <span className="theme-switch-text">{theme === "dark" ? "Dark" : "Light"}</span>
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="Toggle light/dark mode"
+              checked={theme === "dark"}
+              onChange={handleThemeSwitchChange}
+            />
+            <span className="theme-switch-track">
+              <span className="theme-switch-thumb" />
+            </span>
+          </label>
         </div>
-        <div className="timestamp">Last modified: {new Date(state.lastModified).toLocaleString()}</div>
       </header>
 
       {loadError && <div className="banner warning">{loadError}</div>}
       {saveError && <div className="banner error">{saveError}</div>}
       {importError && <div className="banner error">{importError}</div>}
       {importSuccess && <div className="banner success">{importSuccess}</div>}
-      <div className="banner info">Firebase project: {firebaseProjectId}</div>
       {firebaseInitError && <div className="banner error">Firebase init error: {firebaseInitError}</div>}
 
       <main className="layout">
@@ -1179,11 +1339,17 @@ export default function App() {
             <>
               <div className="stats-grid">
                 <article className="stat-card">
-                  <h3>Overall GPA</h3>
+                  <h3>
+                    <span className="stat-title-icon" aria-hidden="true">📈</span>
+                    Overall GPA
+                  </h3>
                   <div className="metric">{formatGpa(overallGpa)}</div>
                 </article>
                 <article className="stat-card">
-                  <h3>Total Earned Credits</h3>
+                  <h3>
+                    <span className="stat-title-icon" aria-hidden="true">🧮</span>
+                    Total Earned Credits
+                  </h3>
                   <div className="metric">{totalCredits.toFixed(1)}</div>
                 </article>
               </div>
@@ -1651,6 +1817,9 @@ export default function App() {
           )}
         </section>
       </main>
+      <footer style={{ textAlign: 'center', padding: '0.5rem', fontSize: '0.75rem', color: '#888' }}>
+        App version (Updated lately): {__BUILD_DATE__}
+      </footer>
     </div>
   );
 }

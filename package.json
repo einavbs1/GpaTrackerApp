@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"wait-on tcp:5173 ; electron .\"",
     "dev:web": "vite",
+    "preview:web": "vite --open",
     "start": "electron .",
     "build": "vite build",
     "preview": "vite preview"

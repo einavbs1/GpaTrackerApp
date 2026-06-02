@@ -11,6 +11,7 @@ export function buildDefaultState(): AppState {
 
   return {
     lastModified: Date.now(),
+    theme: "light",
     profiles: [profile],
     activeProfileId: profile.id
   };
@@ -66,6 +67,7 @@ export function normalizeState(input: unknown): AppState {
 
   return {
     lastModified: typeof source.lastModified === "number" ? source.lastModified : Date.now(),
+    theme: source.theme === "dark" || source.theme === "light" ? source.theme : "light",
     profiles: profiles.length > 0 ? profiles : buildDefaultState().profiles,
     activeProfileId
   };
@@ -78,6 +80,10 @@ export function isValidImportedState(input: unknown): input is AppState {
 
   const state = input as Partial<AppState>;
   if (typeof state.lastModified !== "number" || !Array.isArray(state.profiles)) {
+    return false;
+  }
+
+  if (state.theme !== undefined && state.theme !== "dark" && state.theme !== "light") {
     return false;
   }
 
