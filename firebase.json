@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "gpa-tracker-41f4f",
     "public": "dist",
     "ignore": [
       "firebase.json",
