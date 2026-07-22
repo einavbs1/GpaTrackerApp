@@ -109,14 +109,20 @@ function parseCourseDraft(draft: CourseDraft): Omit<Course, "id"> | null {
   const credits = Number(draft.credits);
   if (!Number.isFinite(credits) || credits <= 0) return null;
 
-  if (draft.isBinaryPass) {
-    return { name, credits, grade: null, isBinaryPass: true };
+  const gradeText = draft.grade.trim();
+
+  if (gradeText === "") {
+    // Grade is optional for binary pass courses, required otherwise.
+    if (draft.isBinaryPass) {
+      return { name, credits, grade: null, isBinaryPass: true };
+    }
+    return null;
   }
 
-  const grade = Number(draft.grade);
+  const grade = Number(gradeText);
   if (!Number.isFinite(grade) || grade < 0 || grade > 100) return null;
 
-  return { name, credits, grade, isBinaryPass: false };
+  return { name, credits, grade, isBinaryPass: draft.isBinaryPass };
 }
 
 export default function App() {
@@ -503,7 +509,7 @@ export default function App() {
         Season: semester.season,
         Course: course.name,
         Credits: course.credits,
-        Grade: course.isBinaryPass ? "N/A" : course.grade,
+        Grade: course.grade === null ? "N/A" : course.grade,
         BinaryPass: course.isBinaryPass ? "Yes" : "No",
         SemesterGPA: formatGpa(semesterGpa),
         OverallGPA: formatGpa(overallGpa)
@@ -903,8 +909,7 @@ export default function App() {
 
             return {
               ...course,
-              isBinaryPass: true,
-              grade: null
+              isBinaryPass: true
             };
           })
         })
@@ -938,9 +943,6 @@ export default function App() {
     setCourseDraftBySemester((prev) => {
       const current = prev[semesterId] ?? EMPTY_COURSE_DRAFT;
       const next = { ...current, ...patch };
-      if (next.isBinaryPass) {
-        next.grade = "";
-      }
       return {
         ...prev,
         [semesterId]: next
@@ -1704,7 +1706,6 @@ export default function App() {
                                   min={0}
                                   max={100}
                                   step={1}
-                                  disabled={courseDraft.isBinaryPass}
                                   value={courseDraft.grade}
                                   onChange={(event) => handleCourseDraftChange(semester.id, { grade: event.target.value })}
                                 />
@@ -1752,7 +1753,6 @@ export default function App() {
                                               type="number"
                                               min={0}
                                               max={100}
-                                              disabled={editingCourseDraft.isBinaryPass}
                                               value={editingCourseDraft.grade}
                                               onChange={(event) => setEditingCourseDraft((prev) => ({ ...prev, grade: event.target.value }))}
                                             />
@@ -1761,7 +1761,7 @@ export default function App() {
                                             <input
                                               type="checkbox"
                                               checked={editingCourseDraft.isBinaryPass}
-                                              onChange={(event) => setEditingCourseDraft((prev) => ({ ...prev, isBinaryPass: event.target.checked, grade: event.target.checked ? "" : prev.grade }))}
+                                              onChange={(event) => setEditingCourseDraft((prev) => ({ ...prev, isBinaryPass: event.target.checked }))}
                                             />
                                           </td>
                                           <td>
@@ -1779,7 +1779,7 @@ export default function App() {
                                         <>
                                           <td>{course.name}</td>
                                           <td>{course.credits.toFixed(1)}</td>
-                                          <td>{course.isBinaryPass ? "N/A" : course.grade}</td>
+                                          <td>{course.grade === null ? "N/A" : course.grade}</td>
                                           <td>{course.isBinaryPass ? "Yes" : "No"}</td>
                                           <td>
                                             <div className="actions-inline">

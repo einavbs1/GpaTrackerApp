@@ -51,7 +51,7 @@ export function normalizeState(input: unknown): AppState {
                     id: typeof course.id === "string" ? course.id : createId(),
                     name: typeof course.name === "string" ? course.name : "Unnamed Course",
                     credits: typeof course.credits === "number" ? course.credits : 0,
-                    grade: isBinaryPass ? null : typeof course.grade === "number" ? course.grade : null,
+                    grade: typeof course.grade === "number" ? course.grade : null,
                     isBinaryPass
                   };
                 })
