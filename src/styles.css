@@ -1256,6 +1256,30 @@ button,
   font-size: 1.15rem;
 }
 
+.modal-wide {
+  width: min(720px, 100%);
+}
+
+.modal-subtitle {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.modal-note {
+  margin-right: auto;
+  align-self: center;
+  font-size: 0.83rem;
+  color: var(--banner-ok-text);
+}
+
+.field-required {
+  color: var(--banner-err-text);
+  font-weight: 700;
+}
+
 .modal-dialog .row-fields {
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   align-items: end;

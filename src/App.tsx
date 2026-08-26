@@ -244,6 +244,8 @@ export default function App() {
   const [courseFormError, setCourseFormError] = useState<string | null>(null);
   const [courseFormErrorBySemester, setCourseFormErrorBySemester] = useState<Record<string, string | null>>({});
   const [focusSemesterId, setFocusSemesterId] = useState<string | null>(null);
+  const [addCourseSemesterId, setAddCourseSemesterId] = useState<string | null>(null);
+  const [addCourseAddedCount, setAddCourseAddedCount] = useState(0);
   const [simulatorMode, setSimulatorMode] = useState<"closed" | "open" | "tab">("closed");
   const [simPos, setSimPos] = useState<{ x: number; y: number } | null>(null);
   const [isDraggingSim, setIsDraggingSim] = useState(false);
@@ -347,17 +349,40 @@ export default function App() {
     action();
   }
 
+  function openAddCourse(semesterId: string) {
+    setCourseDraftBySemester((prev) => ({ ...prev, [semesterId]: { ...EMPTY_COURSE_DRAFT } }));
+    setCourseFormErrorBySemester((prev) => ({ ...prev, [semesterId]: null }));
+    setAddCourseAddedCount(0);
+    setAddCourseSemesterId(semesterId);
+  }
+
+  function closeAddCourse() {
+    setAddCourseSemesterId(null);
+    setAddCourseAddedCount(0);
+  }
+
   useEffect(() => {
     if (!focusSemesterId) return;
 
     const frame = requestAnimationFrame(() => {
       semesterNodeRefs.current[focusSemesterId]?.scrollIntoView({ behavior: "smooth", block: "center" });
-      courseNameInputRefs.current[focusSemesterId]?.focus();
+      openAddCourse(focusSemesterId);
       setFocusSemesterId(null);
     });
 
     return () => cancelAnimationFrame(frame);
   }, [focusSemesterId]);
+
+  useEffect(() => {
+    if (!addCourseSemesterId) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeAddCourse();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [addCourseSemesterId]);
 
   function clampSimPos(x: number, y: number) {
     const panel = simPanelRef.current;
@@ -1390,6 +1415,10 @@ export default function App() {
       ...prev,
       [semesterId]: { ...EMPTY_COURSE_DRAFT }
     }));
+
+    // Dialog stays open so several courses can be entered in one pass.
+    setAddCourseAddedCount((prev) => prev + 1);
+    courseNameInputRefs.current[semesterId]?.focus();
   }
 
   function handleDeleteCourse(profileId: string, semesterId: string, courseId: string) {
@@ -2209,7 +2238,6 @@ export default function App() {
                           <div className="year-group-body">
                             {group.semesters.map((semester) => {
                               const semesterGpa = calculateSemesterGpa(semester.courses);
-                              const courseDraft = courseDraftBySemester[semester.id] ?? EMPTY_COURSE_DRAFT;
                               const isEditingSemester = editingSemesterId === semester.id;
                               const isExpanded = isSemesterExpanded(semester.id);
                               const semesterMatches = searchMatchesBySemester.get(semester.id);
@@ -2248,6 +2276,9 @@ export default function App() {
                                     </button>
                                     {isExpanded && (
                                       <div className="semester-actions actions-inline">
+                                        <button type="button" onClick={() => openAddCourse(semester.id)}>
+                                          <Icon name="plus" /> Add Course
+                                        </button>
                                         {isEditingSemester ? (
                                           <>
                                             <button type="button" onClick={() => saveEditSemester(activeProfile.id, semester.id)}>
@@ -2331,61 +2362,6 @@ export default function App() {
                               </label>
                             </div>
                           )}
-
-                          <div className="course-create">
-                            <h4>Add Course</h4>
-                            <div className="row-fields compact">
-                              <label>
-                                Code <span className="field-optional">(optional)</span>
-                                <input
-                                  type="text"
-                                  placeholder="e.g. 104013"
-                                  value={courseDraft.code}
-                                  onChange={(event) => handleCourseDraftChange(semester.id, { code: event.target.value })}
-                                />
-                              </label>
-                              <label>
-                                Name
-                                <input
-                                  type="text"
-                                  ref={(node) => {
-                                    courseNameInputRefs.current[semester.id] = node;
-                                  }}
-                                  value={courseDraft.name}
-                                  onChange={(event) => handleCourseDraftChange(semester.id, { name: event.target.value })}
-                                />
-                              </label>
-                              <label>
-                                Credits
-                                <input type="number" min={0} step={0.5} value={courseDraft.credits} onChange={(event) => handleCourseDraftChange(semester.id, { credits: event.target.value })} />
-                              </label>
-                              <label>
-                                Grade (0-100)
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  step={1}
-                                  value={courseDraft.grade}
-                                  onChange={(event) => handleCourseDraftChange(semester.id, { grade: event.target.value })}
-                                />
-                              </label>
-                              <label className="checkbox-label">
-                                <input
-                                  type="checkbox"
-                                  checked={courseDraft.isBinaryPass}
-                                  onChange={(event) => handleCourseDraftChange(semester.id, { isBinaryPass: event.target.checked })}
-                                />
-                                Binary Pass (Pass/Fail)
-                              </label>
-                              <button type="button" onClick={() => handleAddCourse(activeProfile.id, semester.id)}>
-                                <Icon name="plus" /> Add Course
-                              </button>
-                            </div>
-                            {courseFormErrorBySemester[semester.id] && (
-                              <div className="form-error">{courseFormErrorBySemester[semester.id]}</div>
-                            )}
-                          </div>
 
                           <div className="courses-table-wrap">
                             <table>
@@ -2504,6 +2480,115 @@ export default function App() {
           )}
         </section>
       </main>
+
+      {addCourseSemesterId && activeProfile && (() => {
+        const semesterId = addCourseSemesterId;
+        const semester = activeProfile.semesters.find((item) => item.id === semesterId);
+        const draft = courseDraftBySemester[semesterId] ?? EMPTY_COURSE_DRAFT;
+        const invalidReason = validateCourseDraft(draft);
+
+        return (
+          <div
+            className="modal-backdrop"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) closeAddCourse();
+            }}
+          >
+            <div className="modal-dialog modal-wide" role="dialog" aria-modal="true" aria-labelledby="add-course-title">
+              <h3 id="add-course-title">
+                Add Course
+                {semester && (
+                  <span className="modal-subtitle">
+                    Year {semester.academicYear} · Semester {semester.semesterNumber} · {semester.season}
+                  </span>
+                )}
+              </h3>
+
+              <div className="row-fields compact">
+                <label>
+                  Code <span className="field-optional">(optional)</span>
+                  <input
+                    type="text"
+                    placeholder="e.g. 104013"
+                    value={draft.code}
+                    onChange={(event) => handleCourseDraftChange(semesterId, { code: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Name <span className="field-required">*</span>
+                  <input
+                    type="text"
+                    autoFocus
+                    ref={(node) => {
+                      courseNameInputRefs.current[semesterId] = node;
+                    }}
+                    value={draft.name}
+                    onChange={(event) => handleCourseDraftChange(semesterId, { name: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Credits <span className="field-required">*</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={draft.credits}
+                    onChange={(event) => handleCourseDraftChange(semesterId, { credits: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Grade (0-100) {!draft.isBinaryPass && <span className="field-required">*</span>}
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    disabled={draft.isBinaryPass}
+                    value={draft.grade}
+                    onChange={(event) => handleCourseDraftChange(semesterId, { grade: event.target.value })}
+                  />
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={draft.isBinaryPass}
+                    onChange={(event) =>
+                      handleCourseDraftChange(semesterId, {
+                        isBinaryPass: event.target.checked,
+                        ...(event.target.checked ? { grade: "" } : {})
+                      })
+                    }
+                  />
+                  Binary Pass (Pass/Fail)
+                </label>
+              </div>
+
+              {courseFormErrorBySemester[semesterId] && (
+                <div className="form-error">{courseFormErrorBySemester[semesterId]}</div>
+              )}
+
+              <div className="modal-actions">
+                {addCourseAddedCount > 0 && (
+                  <span className="modal-note">
+                    {addCourseAddedCount} course{addCourseAddedCount === 1 ? "" : "s"} added
+                  </span>
+                )}
+                <button type="button" className="neutral" onClick={closeAddCourse}>
+                  <Icon name="check" /> Done
+                </button>
+                <button
+                  type="button"
+                  disabled={invalidReason !== null}
+                  title={invalidReason ?? undefined}
+                  onClick={() => handleAddCourse(activeProfile.id, semesterId)}
+                >
+                  <Icon name="plus" /> Add Course
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {isAddSemesterOpen && activeProfile && (
         <div

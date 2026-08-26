@@ -1,7 +1,11 @@
 ﻿{
     "nextBump":  "minor",
     "pending":  [
-
+                    "Add Course now opens a dialog instead of an always-visible inline form",
+                    "Add Course button moved onto the semester actions row",
+                    "Required fields are marked and the Add button stays disabled until they are valid",
+                    "Grade field is disabled and cleared when Binary Pass is ticked",
+                    "Dialog stays open after adding so several courses can be entered in one pass"
                 ],
     "releases":  {
                      "2.3.0":  {
