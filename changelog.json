@@ -4,6 +4,13 @@
 
                 ],
     "releases":  {
+                     "2.6.0":  {
+                                   "date":  "2026-08-26",
+                                   "type":  "minor",
+                                   "changes":  [
+                                                   "No changelog entries recorded for this release."
+                                               ]
+                               },
                      "2.5.0":  {
                                    "date":  "2026-08-26",
                                    "type":  "minor",
