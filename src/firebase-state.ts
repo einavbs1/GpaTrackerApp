@@ -6,6 +6,7 @@ export function buildDefaultState(): AppState {
   const profile: Profile = {
     id: createId(),
     name: "Default Profile",
+    binaryCreditCap: null,
     semesters: []
   };
 
@@ -32,6 +33,12 @@ export function normalizeState(input: unknown): AppState {
       return {
         id: typeof profile.id === "string" ? profile.id : createId(),
         name: typeof profile.name === "string" ? profile.name : "Unnamed Profile",
+        binaryCreditCap:
+          typeof profile.binaryCreditCap === "number" &&
+          Number.isFinite(profile.binaryCreditCap) &&
+          profile.binaryCreditCap > 0
+            ? profile.binaryCreditCap
+            : null,
         semesters: semestersRaw
           .filter((semester) => Boolean(semester && typeof semester === "object"))
           .map((semester) => {
@@ -97,6 +104,14 @@ export function isValidImportedState(input: unknown): input is AppState {
     }
 
     if (typeof profile.id !== "string" || typeof profile.name !== "string" || !Array.isArray(profile.semesters)) {
+      return false;
+    }
+
+    if (
+      profile.binaryCreditCap !== undefined &&
+      profile.binaryCreditCap !== null &&
+      typeof profile.binaryCreditCap !== "number"
+    ) {
       return false;
     }
 

@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AuthCredential,
@@ -14,11 +14,13 @@ import {
   signOut
 } from "firebase/auth";
 import {
+  aggregateCourses,
   calculateAnnualGpas,
   calculateOverallGpa,
   calculateSemesterGpa,
   calculateTotalEarnedCredits,
-  formatGpa
+  formatGpa,
+  gpaAfterBinarizing
 } from "./calculations";
 import { auth, firebaseInitError, firebaseProjectId, googleProvider } from "./firebase";
 import {
@@ -36,6 +38,42 @@ type CourseDraft = {
   grade: string;
   isBinaryPass: boolean;
 };
+
+type BinarySortMode = "impact" | "grade" | "credits" | "chronological";
+
+type BinaryCandidate = {
+  key: string;
+  courseId: string;
+  semesterId: string;
+  academicYear: number;
+  semesterNumber: number;
+  season: SemesterSeason;
+  courseName: string;
+  credits: number;
+  grade: number;
+  gapFromOverall: number;
+  impactScore: number;
+  soloGpa: number | null;
+  soloDelta: number | null;
+};
+
+const BINARY_SORT_OPTIONS: Array<{ value: BinarySortMode; label: string }> = [
+  { value: "impact", label: "Biggest impact" },
+  { value: "grade", label: "Lowest grade" },
+  { value: "credits", label: "Most credits" },
+  { value: "chronological", label: "Chronological" }
+];
+
+function formatDelta(value: number | null): string {
+  if (value === null) return "";
+  if (Math.abs(value) < 0.005) return "\u00b10.00";
+  return `${value > 0 ? "+" : "\u2212"}${Math.abs(value).toFixed(2)}`;
+}
+
+function deltaClassName(value: number | null): string {
+  if (value === null || Math.abs(value) < 0.005) return "sim-delta";
+  return value > 0 ? "sim-delta is-positive" : "sim-delta is-negative";
+}
 
 type SemesterDraft = {
   academicYear: string;
@@ -77,6 +115,42 @@ function sortSemesters(semesters: Semester[]): Semester[] {
 
     return a.season.localeCompare(b.season);
   });
+}
+
+// Index-based on purpose: a regex built from user input would throw on "(" and risks ReDoS.
+function highlightMatch(text: string, query: string): ReactNode {
+  if (!query) return text;
+
+  const haystack = text.toLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let found = haystack.indexOf(query, cursor);
+
+  while (found !== -1) {
+    if (found > cursor) {
+      parts.push(text.slice(cursor, found));
+    }
+    parts.push(
+      <mark key={`${found}_${parts.length}`} className="search-hit">
+        {text.slice(found, found + query.length)}
+      </mark>
+    );
+    cursor = found + query.length;
+    found = haystack.indexOf(query, cursor);
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+
+  return parts;
+}
+
+function summarizeCourses(courses: Course[]): { count: number; credits: number } {
+  return {
+    count: courses.length,
+    credits: courses.reduce((sum, course) => sum + course.credits, 0)
+  };
 }
 
 function getNextSemesterDraft(profile: Profile | null): SemesterDraft {
@@ -142,20 +216,21 @@ export default function App() {
   const [semesterDraftByProfile, setSemesterDraftByProfile] = useState<Record<string, SemesterDraft>>({});
   const [courseDraftBySemester, setCourseDraftBySemester] = useState<Record<string, CourseDraft>>({});
   const [collapsedSemesterById, setCollapsedSemesterById] = useState<Record<string, boolean>>({});
+  const [collapsedYearByNumber, setCollapsedYearByNumber] = useState<Record<number, boolean>>({});
+  const [courseSearchQuery, setCourseSearchQuery] = useState("");
+  const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
+  const [isAddSemesterOpen, setIsAddSemesterOpen] = useState(false);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingProfileName, setEditingProfileName] = useState("");
   const [editingSemesterId, setEditingSemesterId] = useState<string | null>(null);
   const [editingSemesterDraft, setEditingSemesterDraft] = useState<SemesterDraft>(EMPTY_SEMESTER_DRAFT);
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [editingCourseDraft, setEditingCourseDraft] = useState<CourseDraft>(EMPTY_COURSE_DRAFT);
-  const [showBelowOverallTable, setShowBelowOverallTable] = useState(false);
-  const [showWorstImpactTable, setShowWorstImpactTable] = useState(false);
-  const [showAllBelowOverallCourses, setShowAllBelowOverallCourses] = useState(false);
+  const [showSimulator, setShowSimulator] = useState(false);
   const [showAllWorstCourses, setShowAllWorstCourses] = useState(false);
+  const [binarySortMode, setBinarySortMode] = useState<BinarySortMode>("impact");
   const [worstSemesterFilterById, setWorstSemesterFilterById] = useState<Record<string, boolean>>({});
   const [selectedWorstCourseByKey, setSelectedWorstCourseByKey] = useState<Record<string, boolean>>({});
-  const [simulatedOverallForSelection, setSimulatedOverallForSelection] = useState<number | null | undefined>(undefined);
-  const [simulationSelectionWarning, setSimulationSelectionWarning] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -166,17 +241,55 @@ export default function App() {
 
   const previousSerializedRef = useRef<string>("");
   const hasLoadedUserStateRef = useRef(false);
+  const dataMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
-  function handleThemeSwitchChange(event: ChangeEvent<HTMLInputElement>) {
-    const nextTheme = event.target.checked ? "dark" : "light";
+  useEffect(() => {
+    if (!isDataMenuOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (dataMenuRef.current && !dataMenuRef.current.contains(event.target as Node)) {
+        setIsDataMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsDataMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isDataMenuOpen]);
+
+  useEffect(() => {
+    if (!isAddSemesterOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsAddSemesterOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isAddSemesterOpen]);
+
+  function toggleTheme() {
+    const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
     if (user) {
       setMutatingState((prev) => (prev.theme === nextTheme ? prev : { ...prev, theme: nextTheme }));
     }
+  }
+
+  function runFromMenu(action: () => void) {
+    setIsDataMenuOpen(false);
+    action();
   }
 
   useEffect(() => {
@@ -261,6 +374,84 @@ export default function App() {
   const overallGpa = activeProfile ? calculateOverallGpa(activeProfile) : null;
   const totalCredits = activeProfile ? calculateTotalEarnedCredits(activeProfile) : 0;
 
+  const normalizedSearchQuery = courseSearchQuery.trim().toLowerCase();
+  const isSearching = normalizedSearchQuery.length > 0;
+
+  const searchMatchesBySemester = useMemo(() => {
+    const matches = new Map<string, Set<string>>();
+    if (!isSearching) return matches;
+
+    for (const semester of sortedActiveSemesters) {
+      const hits = semester.courses
+        .filter((course) => course.name.toLowerCase().includes(normalizedSearchQuery))
+        .map((course) => course.id);
+      if (hits.length > 0) {
+        matches.set(semester.id, new Set(hits));
+      }
+    }
+
+    return matches;
+  }, [isSearching, normalizedSearchQuery, sortedActiveSemesters]);
+
+  const searchMatchCount = useMemo(() => {
+    let total = 0;
+    for (const hits of searchMatchesBySemester.values()) {
+      total += hits.size;
+    }
+    return total;
+  }, [searchMatchesBySemester]);
+
+  const semesterGroupsByYear = useMemo(() => {
+    const byYear = new Map<number, Semester[]>();
+    for (const semester of sortedActiveSemesters) {
+      const existing = byYear.get(semester.academicYear) ?? [];
+      existing.push(semester);
+      byYear.set(semester.academicYear, existing);
+    }
+
+    return [...byYear.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([year, semesters]) => {
+        const courses = semesters.flatMap((semester) => semester.courses);
+        const matchCount = semesters.reduce(
+          (sum, semester) => sum + (searchMatchesBySemester.get(semester.id)?.size ?? 0),
+          0
+        );
+
+        return {
+          year,
+          semesters,
+          gpa: annualGpas[year] ?? null,
+          courseCount: courses.length,
+          credits: courses.reduce((sum, course) => sum + course.credits, 0),
+          matchCount
+        };
+      });
+  }, [annualGpas, searchMatchesBySemester, sortedActiveSemesters]);
+
+  const visibleYearGroups = useMemo(() => {
+    if (!isSearching) return semesterGroupsByYear;
+    return semesterGroupsByYear
+      .filter((group) => group.matchCount > 0)
+      .map((group) => ({
+        ...group,
+        semesters: group.semesters.filter((semester) => searchMatchesBySemester.has(semester.id))
+      }));
+  }, [isSearching, searchMatchesBySemester, semesterGroupsByYear]);
+
+  function isSemesterExpanded(semesterId: string): boolean {
+    if (isSearching) return searchMatchesBySemester.has(semesterId);
+    return !(collapsedSemesterById[semesterId] ?? true);
+  }
+
+  function isYearExpanded(year: number, matchCount: number): boolean {
+    if (isSearching) return matchCount > 0;
+    return !(collapsedYearByNumber[year] ?? false);
+  }
+
+  const canExpandAll = sortedActiveSemesters.some((semester) => (collapsedSemesterById[semester.id] ?? true));
+  const canCollapseAll = sortedActiveSemesters.some((semester) => !(collapsedSemesterById[semester.id] ?? true));
+
   useEffect(() => {
     setWorstSemesterFilterById((prev) => {
       const next: Record<string, boolean> = {};
@@ -278,59 +469,105 @@ export default function App() {
     });
   }, [sortedActiveSemesters]);
 
+  const baseAggregation = useMemo(() => {
+    return aggregateCourses(activeProfile ? activeProfile.semesters.flatMap((semester) => semester.courses) : []);
+  }, [activeProfile]);
+
+  const existingBinaryCredits = useMemo(() => {
+    if (!activeProfile) return 0;
+    return activeProfile.semesters
+      .flatMap((semester) => semester.courses)
+      .filter((course) => course.isBinaryPass)
+      .reduce((sum, course) => sum + course.credits, 0);
+  }, [activeProfile]);
+
   const coursesBelowOverall = useMemo(() => {
     if (!activeProfile || overallGpa === null) {
-      return [] as Array<{
-        courseId: string;
-        semesterId: string;
-        academicYear: number;
-        semesterNumber: number;
-        season: SemesterSeason;
-        courseName: string;
-        credits: number;
-        grade: number;
-        gapFromOverall: number;
-        impactScore: number;
-      }>;
+      return [] as BinaryCandidate[];
     }
 
     return sortSemesters(activeProfile.semesters).flatMap((semester) =>
       semester.courses
         .filter((course) => !course.isBinaryPass && course.grade !== null && course.grade < overallGpa)
-        .map((course) => ({
-          courseId: course.id,
-          semesterId: semester.id,
-          academicYear: semester.academicYear,
-          semesterNumber: semester.semesterNumber,
-          season: semester.season,
-          courseName: course.name,
-          credits: course.credits,
-          grade: course.grade as number,
-          gapFromOverall: overallGpa - (course.grade as number),
-          impactScore: (overallGpa - (course.grade as number)) * course.credits
-        }))
+        .map((course) => {
+          const grade = course.grade as number;
+          const soloGpa = gpaAfterBinarizing(baseAggregation, [{ grade, credits: course.credits }]);
+          return {
+            key: `${semester.id}_${course.id}`,
+            courseId: course.id,
+            semesterId: semester.id,
+            academicYear: semester.academicYear,
+            semesterNumber: semester.semesterNumber,
+            season: semester.season,
+            courseName: course.name,
+            credits: course.credits,
+            grade,
+            gapFromOverall: overallGpa - grade,
+            impactScore: (overallGpa - grade) * course.credits,
+            soloGpa,
+            soloDelta: soloGpa === null ? null : soloGpa - overallGpa
+          };
+        })
     );
-  }, [activeProfile, overallGpa]);
+  }, [activeProfile, baseAggregation, overallGpa]);
 
   const worstCoursesFromSelectedSemesters = useMemo(() => {
     return coursesBelowOverall.filter((course) => worstSemesterFilterById[course.semesterId] ?? true);
   }, [coursesBelowOverall, worstSemesterFilterById]);
 
   const topWorstCourses = useMemo(() => {
-    return [...worstCoursesFromSelectedSemesters].sort((a, b) => b.impactScore - a.impactScore);
-  }, [worstCoursesFromSelectedSemesters]);
-
-  const visibleBelowOverallCourses = useMemo(() => {
-    return showAllBelowOverallCourses ? coursesBelowOverall : coursesBelowOverall.slice(0, 5);
-  }, [coursesBelowOverall, showAllBelowOverallCourses]);
+    const sorted = [...worstCoursesFromSelectedSemesters];
+    switch (binarySortMode) {
+      case "grade":
+        return sorted.sort((a, b) => a.grade - b.grade);
+      case "credits":
+        return sorted.sort((a, b) => b.credits - a.credits);
+      case "chronological":
+        return sorted;
+      case "impact":
+      default:
+        return sorted.sort((a, b) => b.impactScore - a.impactScore);
+    }
+  }, [binarySortMode, worstCoursesFromSelectedSemesters]);
 
   const visibleWorstCourses = useMemo(() => {
     return showAllWorstCourses ? topWorstCourses : topWorstCourses.slice(0, 5);
   }, [showAllWorstCourses, topWorstCourses]);
 
+  const selectedWorstCourses = useMemo(() => {
+    return topWorstCourses.filter((course) => selectedWorstCourseByKey[course.key]);
+  }, [selectedWorstCourseByKey, topWorstCourses]);
+
+  const simulatedOverallGpa = useMemo(() => {
+    if (selectedWorstCourses.length === 0) {
+      return overallGpa;
+    }
+
+    return gpaAfterBinarizing(
+      baseAggregation,
+      selectedWorstCourses.map((course) => ({ grade: course.grade, credits: course.credits }))
+    );
+  }, [baseAggregation, overallGpa, selectedWorstCourses]);
+
+  const simulatedDelta = useMemo(() => {
+    if (simulatedOverallGpa === null || overallGpa === null) return null;
+    return simulatedOverallGpa - overallGpa;
+  }, [overallGpa, simulatedOverallGpa]);
+
+  const selectedBinaryCredits = useMemo(() => {
+    return selectedWorstCourses.reduce((sum, course) => sum + course.credits, 0);
+  }, [selectedWorstCourses]);
+
+  const binaryCreditCap = activeProfile?.binaryCreditCap ?? null;
+  const projectedBinaryCredits = existingBinaryCredits + selectedBinaryCredits;
+  const isOverBinaryCap = binaryCreditCap !== null && projectedBinaryCredits > binaryCreditCap;
+  const selectedSemesterFilterCount = sortedActiveSemesters.filter(
+    (semester) => worstSemesterFilterById[semester.id] ?? true
+  ).length;
+
   useEffect(() => {
     setSelectedWorstCourseByKey((prev) => {
-      const allowedKeys = new Set(topWorstCourses.map((course) => `${course.semesterId}_${course.courseId}`));
+      const allowedKeys = new Set(topWorstCourses.map((course) => course.key));
       const next = Object.fromEntries(
         Object.entries(prev).filter(([key, value]) => value && allowedKeys.has(key))
       ) as Record<string, boolean>;
@@ -624,7 +861,7 @@ export default function App() {
     if (!name) return;
 
     const id = createId();
-    const profile: Profile = { id, name, semesters: [] };
+    const profile: Profile = { id, name, binaryCreditCap: null, semesters: [] };
 
     setMutatingState((prev) => ({
       ...prev,
@@ -640,6 +877,14 @@ export default function App() {
   }
 
   function handleDeleteProfile(id: string) {
+    const profile = state.profiles.find((item) => item.id === id);
+    const semesterCount = profile?.semesters.length ?? 0;
+    const courseCount = profile?.semesters.reduce((sum, semester) => sum + semester.courses.length, 0) ?? 0;
+    const confirmed = window.confirm(
+      `Delete profile "${profile?.name ?? id}"?\n\n${semesterCount} semester(s) and ${courseCount} course(s) will be permanently removed. This cannot be undone.`
+    );
+    if (!confirmed) return;
+
     setMutatingState((prev) => {
       const profiles = prev.profiles.filter((profile) => profile.id !== id);
       const nextProfiles = profiles.length > 0 ? profiles : buildDefaultState().profiles;
@@ -818,6 +1063,16 @@ export default function App() {
   }
 
   function handleDeleteSemester(profileId: string, semesterId: string) {
+    const semester = state.profiles
+      .find((profile) => profile.id === profileId)
+      ?.semesters.find((item) => item.id === semesterId);
+    const confirmed = window.confirm(
+      `Remove Year ${semester?.academicYear} | Semester ${semester?.semesterNumber} | ${semester?.season}?\n\n${
+        semester?.courses.length ?? 0
+      } course(s) will be permanently removed. This cannot be undone.`
+    );
+    if (!confirmed) return;
+
     setMutatingState((prev) => ({
       ...prev,
       profiles: prev.profiles.map((profile) =>
@@ -855,6 +1110,13 @@ export default function App() {
     });
   }
 
+  function toggleYearCollapsed(year: number) {
+    setCollapsedYearByNumber((prev) => ({
+      ...prev,
+      [year]: !(prev[year] ?? false)
+    }));
+  }
+
   function toggleWorstSemesterFilter(semesterId: string, checked: boolean) {
     setWorstSemesterFilterById((prev) => ({
       ...prev,
@@ -878,47 +1140,50 @@ export default function App() {
       ...prev,
       [key]: selected
     }));
-    setSimulationSelectionWarning(null);
   }
 
-  function simulateSelectedWorstCoursesAsBinary() {
+  function handleBinaryCreditCapChange(rawValue: string) {
     if (!activeProfile) return;
 
-    const selectedKeys = new Set(
-      Object.entries(selectedWorstCourseByKey)
-        .filter(([, value]) => value)
-        .map(([key]) => key)
-    );
+    const trimmed = rawValue.trim();
+    const parsed = Number(trimmed);
+    const nextCap = trimmed === "" || !Number.isFinite(parsed) || parsed <= 0 ? null : parsed;
 
-    if (selectedKeys.size === 0) {
-      setSimulationSelectionWarning("Select at least one course to simulate.");
-      setSimulatedOverallForSelection(undefined);
-      return;
-    }
-
-    const simulatedProfile: Profile = {
-      ...activeProfile,
-      semesters: activeProfile.semesters.map((semester) =>
-        ({
-          ...semester,
-          courses: semester.courses.map((course) => {
-            const key = `${semester.id}_${course.id}`;
-            if (!selectedKeys.has(key)) {
-              return course;
-            }
-
-            return {
-              ...course,
-              isBinaryPass: true
-            };
-          })
-        })
+    setMutatingState((prev) => ({
+      ...prev,
+      profiles: prev.profiles.map((profile) =>
+        profile.id === activeProfile.id ? { ...profile, binaryCreditCap: nextCap } : profile
       )
-    };
+    }));
+  }
 
-    const simulatedOverall = calculateOverallGpa(simulatedProfile);
-    setSimulatedOverallForSelection(simulatedOverall);
-    setSimulationSelectionWarning(null);
+  function applySelectedAsBinary() {
+    if (!activeProfile || selectedWorstCourses.length === 0) return;
+
+    const selectedKeys = new Set(selectedWorstCourses.map((course) => course.key));
+    const confirmed = window.confirm(
+      `Mark ${selectedKeys.size} course(s) as binary pass? Their grades stay saved but stop counting toward your GPA.`
+    );
+    if (!confirmed) return;
+
+    setMutatingState((prev) => ({
+      ...prev,
+      profiles: prev.profiles.map((profile) =>
+        profile.id !== activeProfile.id
+          ? profile
+          : {
+              ...profile,
+              semesters: profile.semesters.map((semester) => ({
+                ...semester,
+                courses: semester.courses.map((course) =>
+                  selectedKeys.has(`${semester.id}_${course.id}`) ? { ...course, isBinaryPass: true } : course
+                )
+              }))
+            }
+      )
+    }));
+
+    setSelectedWorstCourseByKey({});
   }
 
   function collapseAllSemesters() {
@@ -937,6 +1202,7 @@ export default function App() {
       ...prev,
       ...Object.fromEntries(activeProfile.semesters.map((semester) => [semester.id, false]))
     }));
+    setCollapsedYearByNumber({});
   }
 
   function handleCourseDraftChange(semesterId: string, patch: Partial<CourseDraft>) {
@@ -981,6 +1247,13 @@ export default function App() {
   }
 
   function handleDeleteCourse(profileId: string, semesterId: string, courseId: string) {
+    const course = state.profiles
+      .find((profile) => profile.id === profileId)
+      ?.semesters.find((semester) => semester.id === semesterId)
+      ?.courses.find((item) => item.id === courseId);
+    const confirmed = window.confirm(`Delete course "${course?.name ?? courseId}"? This cannot be undone.`);
+    if (!confirmed) return;
+
     setMutatingState((prev) => ({
       ...prev,
       profiles: prev.profiles.map((profile) =>
@@ -1047,7 +1320,12 @@ export default function App() {
   }
 
   if (authLoading) {
-    return <div className="status-screen">Checking authentication...</div>;
+    return (
+      <div className="status-screen">
+        Checking authentication...
+        <VersionFooter />
+      </div>
+    );
   }
 
   if (!user) {
@@ -1055,19 +1333,29 @@ export default function App() {
       <div className="landing-shell">
         <section className="landing-card">
           <div className="landing-card-tools">
-            <label className="theme-switch theme-switch-landing" title="Toggle light/dark mode">
-              <span className="theme-switch-text">{theme === "dark" ? "Dark" : "Light"}</span>
-              <input
-                type="checkbox"
-                role="switch"
-                aria-label="Toggle light/dark mode"
-                checked={theme === "dark"}
-                onChange={handleThemeSwitchChange}
-              />
-              <span className="theme-switch-track">
-                <span className="theme-switch-thumb" />
-              </span>
-            </label>
+            <button
+              type="button"
+              className="icon-btn"
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              onClick={toggleTheme}
+            >
+              {theme === "dark" ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0V3a1 1 0 0 1 1-1zm0 17a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1zM3 11h2a1 1 0 0 1 0 2H3a1 1 0 0 1 0-2zm16 0h2a1 1 0 0 1 0 2h-2a1 1 0 0 1 0-2zM5.64 4.22 7.05 5.64a1 1 0 0 1-1.41 1.41L4.22 5.64a1 1 0 0 1 1.42-1.42zm11.31 12.73 1.41 1.41a1 1 0 0 1-1.41 1.42l-1.42-1.42a1 1 0 0 1 1.42-1.41zM18.36 4.22a1 1 0 0 1 1.42 1.42l-1.42 1.41a1 1 0 0 1-1.41-1.41zM7.05 18.36a1 1 0 0 1-1.41 1.42l-1.42-1.42a1 1 0 0 1 1.42-1.41z"
+                  />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M21.64 13a9 9 0 1 1-10.63-10.6 1 1 0 0 1 1.15 1.34 7 7 0 0 0 8.14 8.11 1 1 0 0 1 1.34 1.15z"
+                  />
+                </svg>
+              )}
+            </button>
           </div>
           <div className="landing-hero">
             <div className="landing-icon">🎓</div>
@@ -1222,57 +1510,118 @@ export default function App() {
 
           {authError && <div className="banner error">{authError}</div>}
         </section>
+        <VersionFooter />
       </div>
     );
   }
 
   if (dataLoading) {
-    return <div className="status-screen">Loading your Firestore data...</div>;
+    return (
+      <div className="status-screen">
+        Loading your Firestore data...
+        <VersionFooter />
+      </div>
+    );
   }
+
+  const userLabel = user.displayName ?? user.email ?? user.uid;
+  const userInitial = userLabel.trim().charAt(0).toUpperCase() || "?";
 
   return (
     <div className="app-shell">
       <header className="topbar topbar-authenticated">
-        <div>
+        <div className="topbar-brand">
+          <span className="topbar-brand-mark" aria-hidden="true">🎓</span>
           <h1>Degree GPA Calculator</h1>
-          <div className="user-meta">Signed in as {user.displayName ?? user.email ?? user.uid}</div>
-          <div className="timestamp">Last modified: {new Date(state.lastModified).toLocaleString()}</div>
         </div>
-        <div className="backup-tools">
-          <button type="button" className="neutral" onClick={handleDownloadBackup}>
-            <span aria-hidden="true">⬇️ </span>Download Backup (JSON)
-          </button>
-          <button type="button" className="neutral" onClick={handleExportExcel}>
-            <span aria-hidden="true">📊 </span>Export To Excel
-          </button>
-          <label className="upload-label">
-            <span aria-hidden="true">⬆️ </span>Upload Backup (JSON)
-            <input type="file" accept=".json,application/json" onChange={handleUploadBackup} />
-          </label>
-          <button type="button" className="danger" onClick={handleSignOutUser}>
-            <span className="action-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+        <div className="topbar-actions">
+          <span className="user-chip" title={userLabel}>
+            <span className="user-chip-avatar" aria-hidden="true">{userInitial}</span>
+            <span className="user-chip-name">{userLabel}</span>
+          </span>
+
+          <button
+            type="button"
+            className="icon-btn"
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path
                   fill="currentColor"
-                  d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.41A7 7 0 1 1 7.6 6.6L6.17 5.17a9 9 0 1 0 11.66 0z"
+                  d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0V3a1 1 0 0 1 1-1zm0 17a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1zM3 11h2a1 1 0 0 1 0 2H3a1 1 0 0 1 0-2zm16 0h2a1 1 0 0 1 0 2h-2a1 1 0 0 1 0-2zM5.64 4.22 7.05 5.64a1 1 0 0 1-1.41 1.41L4.22 5.64a1 1 0 0 1 1.42-1.42zm11.31 12.73 1.41 1.41a1 1 0 0 1-1.41 1.42l-1.42-1.42a1 1 0 0 1 1.42-1.41zM18.36 4.22a1 1 0 0 1 1.42 1.42l-1.42 1.41a1 1 0 0 1-1.41-1.41zM7.05 18.36a1 1 0 0 1-1.41 1.42l-1.42-1.42a1 1 0 0 1 1.42-1.41z"
                 />
               </svg>
-            </span>
-            Sign Out
+            ) : (
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M21.64 13a9 9 0 1 1-10.63-10.6 1 1 0 0 1 1.15 1.34 7 7 0 0 0 8.14 8.11 1 1 0 0 1 1.34 1.15z"
+                />
+              </svg>
+            )}
           </button>
-          <label className="theme-switch theme-switch-topbar" title="Toggle light/dark mode">
-            <span className="theme-switch-text">{theme === "dark" ? "Dark" : "Light"}</span>
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="Toggle light/dark mode"
-              checked={theme === "dark"}
-              onChange={handleThemeSwitchChange}
-            />
-            <span className="theme-switch-track">
-              <span className="theme-switch-thumb" />
-            </span>
-          </label>
+
+          <div className="menu-wrap" ref={dataMenuRef}>
+            <button
+              type="button"
+              className={isDataMenuOpen ? "icon-btn is-active" : "icon-btn"}
+              title="Data and backups"
+              aria-label="Data and backups"
+              aria-haspopup="menu"
+              aria-expanded={isDataMenuOpen}
+              onClick={() => setIsDataMenuOpen((prev) => !prev)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M12 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"
+                />
+              </svg>
+            </button>
+            {isDataMenuOpen && (
+              <div className="menu-popup" role="menu">
+                <button type="button" className="menu-item" role="menuitem" onClick={() => runFromMenu(handleDownloadBackup)}>
+                  <span aria-hidden="true">⬇️</span> Download Backup (JSON)
+                </button>
+                <button type="button" className="menu-item" role="menuitem" onClick={() => runFromMenu(handleExportExcel)}>
+                  <span aria-hidden="true">📊</span> Export To Excel
+                </button>
+                <label className="menu-item" role="menuitem">
+                  <span aria-hidden="true">⬆️</span> Upload Backup (JSON)
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(event) => {
+                      setIsDataMenuOpen(false);
+                      handleUploadBackup(event);
+                    }}
+                  />
+                </label>
+                <div className="menu-separator" />
+                <div className="menu-footnote">
+                  Last modified: {new Date(state.lastModified).toLocaleString()}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="icon-btn danger"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={handleSignOutUser}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.41A7 7 0 1 1 7.6 6.6L6.17 5.17a9 9 0 1 0 11.66 0z"
+              />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -1339,6 +1688,38 @@ export default function App() {
             <div className="empty">Create and select a profile to start.</div>
           ) : (
             <>
+              <div className="course-search-bar">
+                <div className="course-search">
+                  <input
+                    type="search"
+                    placeholder="Search courses across all semesters…"
+                    aria-label="Search courses across all semesters"
+                    value={courseSearchQuery}
+                    onChange={(event) => setCourseSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setCourseSearchQuery("");
+                    }}
+                  />
+                  {isSearching && (
+                    <button type="button" className="neutral" onClick={() => setCourseSearchQuery("")}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <button type="button" className="add-semester-btn" onClick={() => setIsAddSemesterOpen(true)}>
+                  <span aria-hidden="true">＋</span> Add Semester
+                </button>
+              </div>
+              {isSearching && (
+                <div className="search-summary">
+                  {searchMatchCount === 0
+                    ? `No course names contain "${courseSearchQuery.trim()}".`
+                    : `${searchMatchCount} course(s) in ${searchMatchesBySemester.size} semester(s).`}
+                </div>
+              )}
+
+              {!isSearching && (
+                <>
               <div className="stats-grid">
                 <article className="stat-card">
                   <h3>
@@ -1372,268 +1753,317 @@ export default function App() {
                 </div>
               </section>
 
-              <section className="below-overall-block">
-                <h3>Non-Binary Courses Below Overall GPA</h3>
+              <section className="below-overall-block binary-simulator">
+                <h3>Binary Pass Simulator</h3>
+                <p className="muted">
+                  Tick any course below to watch your overall GPA update live, as if that grade were switched to pass/fail.
+                </p>
                 <div className="actions-inline">
-                  <button type="button" className="neutral" onClick={() => setShowBelowOverallTable((prev) => !prev)}>
-                    {showBelowOverallTable ? "Hide Non-Binary Courses Below Overall GPA" : "Show Non-Binary Courses Below Overall GPA"}
-                  </button>
-                  <button type="button" className="neutral" onClick={() => setShowWorstImpactTable((prev) => !prev)}>
-                    {showWorstImpactTable ? "Hide Worst Courses For GPA Impact" : "Show Worst Courses For GPA Impact"}
+                  <button type="button" className="neutral" onClick={() => setShowSimulator((prev) => !prev)}>
+                    {showSimulator ? "Hide Simulator" : "Open Simulator"}
                   </button>
                 </div>
-                {overallGpa === null ? (
+                {!showSimulator ? null : overallGpa === null ? (
                   <div className="muted">Overall GPA is not available yet.</div>
                 ) : coursesBelowOverall.length === 0 ? (
                   <div className="muted">No non-binary courses are below your current overall GPA ({formatGpa(overallGpa)}).</div>
                 ) : (
                   <>
-                    {showBelowOverallTable && (
+                    <div className="sim-summary">
+                      <div className="sim-tile">
+                        <span className="sim-tile-label">Current GPA</span>
+                        <strong className="sim-tile-value">{formatGpa(overallGpa)}</strong>
+                      </div>
+                      <div className="sim-tile">
+                        <span className="sim-tile-label">Simulated GPA</span>
+                        <strong className="sim-tile-value">
+                          {formatGpa(simulatedOverallGpa)}
+                          <span className={deltaClassName(simulatedDelta)}>{formatDelta(simulatedDelta)}</span>
+                        </strong>
+                        <span className="sim-tile-note">
+                          {selectedWorstCourses.length === 0
+                            ? "Nothing selected yet"
+                            : `${selectedWorstCourses.length} course(s) as binary`}
+                        </span>
+                      </div>
+                      <div className="sim-tile">
+                        <span className="sim-tile-label">Binary credits</span>
+                        <strong className="sim-tile-value">
+                          {projectedBinaryCredits.toFixed(1)}
+                          {binaryCreditCap !== null && <span className="sim-tile-suffix">/ {binaryCreditCap.toFixed(1)}</span>}
+                        </strong>
+                        <span className="sim-tile-note">
+                          {existingBinaryCredits.toFixed(1)} already binary + {selectedBinaryCredits.toFixed(1)} selected
+                        </span>
+                      </div>
+                      <label className="sim-tile sim-cap">
+                        <span className="sim-tile-label">Credit cap</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          placeholder="No limit"
+                          value={binaryCreditCap ?? ""}
+                          onChange={(event) => handleBinaryCreditCapChange(event.target.value)}
+                        />
+                        <span className="sim-tile-note">Leave empty if your degree has no limit</span>
+                      </label>
+                    </div>
+
+                    {isOverBinaryCap && (
+                      <div className="banner warning">
+                        This selection uses {projectedBinaryCredits.toFixed(1)} binary credits, which is{" "}
+                        {(projectedBinaryCredits - (binaryCreditCap ?? 0)).toFixed(1)} over your cap of{" "}
+                        {(binaryCreditCap ?? 0).toFixed(1)}.
+                      </div>
+                    )}
+                    {simulatedOverallGpa === null && (
+                      <div className="banner warning">
+                        No graded credits would be left, so an overall GPA cannot be calculated for this selection.
+                      </div>
+                    )}
+
+                    <details className="worst-semester-filter">
+                      <summary>
+                        Filter semesters ({selectedSemesterFilterCount} of {sortedActiveSemesters.length} shown)
+                      </summary>
+                      <div className="actions-inline">
+                        <button type="button" className="neutral" onClick={() => setAllWorstSemesters(true)}>
+                          Select All
+                        </button>
+                        <button type="button" className="neutral" onClick={() => setAllWorstSemesters(false)}>
+                          Clear All
+                        </button>
+                      </div>
+                      <div className="worst-semester-filter-grid">
+                        {sortedActiveSemesters.map((semester) => (
+                          <label key={`worst_filter_${semester.id}`} className="checkbox-label worst-semester-option">
+                            <input
+                              type="checkbox"
+                              checked={worstSemesterFilterById[semester.id] ?? true}
+                              onChange={(event) => toggleWorstSemesterFilter(semester.id, event.target.checked)}
+                            />
+                            Year {semester.academicYear} | Sem {semester.semesterNumber} | {semester.season}
+                          </label>
+                        ))}
+                      </div>
+                    </details>
+
+                    {topWorstCourses.length === 0 ? (
+                      <div className="muted">No matching courses for the selected semesters.</div>
+                    ) : (
                       <>
+                        <div className="sim-sort">
+                          <span className="sim-sort-label">Sort by</span>
+                          {BINARY_SORT_OPTIONS.map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={binarySortMode === option.value ? "sim-sort-option is-active" : "sim-sort-option"}
+                              onClick={() => setBinarySortMode(option.value)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+
                         <div className="insight-table-wrap">
                           <table>
                             <thead>
                               <tr>
-                                <th>Year</th>
-                                <th>Semester</th>
-                                <th>Season</th>
+                                <th>Binary</th>
+                                <th>#</th>
                                 <th>Course</th>
+                                <th>When</th>
                                 <th>Grade</th>
                                 <th>Credits</th>
                                 <th>Impact</th>
+                                <th>If only this one</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {visibleBelowOverallCourses.map((course) => (
+                              {visibleWorstCourses.map((course, index) => (
                                 <tr
-                                  key={`${course.semesterId}_${course.courseName}_${course.grade}_${course.credits}`}
-                                  className={`year-row-tone-${((course.academicYear - 1) % 6) + 1}`}
+                                  key={course.key}
+                                  className={`year-row-tone-${((course.academicYear - 1) % 6) + 1}${
+                                    selectedWorstCourseByKey[course.key] ? " is-selected" : ""
+                                  }`}
                                 >
-                                  <td>{course.academicYear}</td>
-                                  <td>{course.semesterNumber}</td>
-                                  <td>{course.season}</td>
+                                  <td>
+                                    <input
+                                      type="checkbox"
+                                      aria-label={`Simulate ${course.courseName} as binary pass`}
+                                      checked={selectedWorstCourseByKey[course.key] ?? false}
+                                      onChange={(event) =>
+                                        toggleWorstCourseSelection(course.semesterId, course.courseId, event.target.checked)
+                                      }
+                                    />
+                                  </td>
+                                  <td>{index + 1}</td>
                                   <td>{course.courseName}</td>
+                                  <td className="sim-when">
+                                    Y{course.academicYear} · S{course.semesterNumber} · {course.season}
+                                  </td>
                                   <td>{course.grade}</td>
                                   <td>{course.credits.toFixed(1)}</td>
                                   <td>{course.impactScore.toFixed(2)}</td>
+                                  <td>
+                                    {formatGpa(course.soloGpa)}
+                                    <span className={deltaClassName(course.soloDelta)}>{formatDelta(course.soloDelta)}</span>
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                         </div>
-                        {coursesBelowOverall.length > 5 && (
-                          <div className="actions-inline">
-                            {!showAllBelowOverallCourses ? (
-                              <button type="button" className="neutral" onClick={() => setShowAllBelowOverallCourses(true)}>
-                                Show All
-                              </button>
-                            ) : (
-                              <button type="button" className="neutral" onClick={() => setShowAllBelowOverallCourses(false)}>
-                                Hide All
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    )}
-                    {showWorstImpactTable && (
-                      <>
-                        <h4>Worst Courses For GPA Impact</h4>
-                        <div className="worst-semester-filter">
-                          <div className="actions-inline">
-                            <button type="button" className="neutral" onClick={() => setAllWorstSemesters(true)}>
-                              Select All Semesters
-                            </button>
-                            <button type="button" className="neutral" onClick={() => setAllWorstSemesters(false)}>
-                              Clear All Semesters
-                            </button>
-                          </div>
-                          <div className="worst-semester-filter-grid">
-                            {sortedActiveSemesters.map((semester) => (
-                              <label key={`worst_filter_${semester.id}`} className="checkbox-label worst-semester-option">
-                                <input
-                                  type="checkbox"
-                                  checked={worstSemesterFilterById[semester.id] ?? true}
-                                  onChange={(event) => toggleWorstSemesterFilter(semester.id, event.target.checked)}
-                                />
-                                Year {semester.academicYear} | Sem {semester.semesterNumber} | {semester.season}
-                              </label>
-                            ))}
-                          </div>
-                        </div>
 
-                        {topWorstCourses.length === 0 ? (
-                          <div className="muted">No matching courses for the selected semesters.</div>
-                        ) : (
-                          <>
-                            <div className="actions-inline">
-                              <button type="button" className="neutral" onClick={simulateSelectedWorstCoursesAsBinary}>
-                                Simulate Overall Grade
-                              </button>
-                              <button type="button" className="neutral" onClick={() => setSelectedWorstCourseByKey({})}>
-                                Clear Selected Courses
-                              </button>
-                            </div>
-                            {simulationSelectionWarning && <div className="muted">{simulationSelectionWarning}</div>}
-                            {simulatedOverallForSelection !== undefined && (
-                              <div className="banner info">
-                                Simulated overall GPA (selected courses as binary): {formatGpa(simulatedOverallForSelection)}
-                              </div>
-                            )}
-                            <div className="insight-table-wrap">
-                              <table>
-                                <thead>
-                                  <tr>
-                                    <th>Select</th>
-                                    <th>Rank</th>
-                                    <th>Year</th>
-                                    <th>Semester</th>
-                                    <th>Season</th>
-                                    <th>Course</th>
-                                    <th>Grade</th>
-                                    <th>Credits</th>
-                                    <th>Impact</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {visibleWorstCourses.map((course, index) => (
-                                    <tr
-                                      key={`worst_${course.semesterId}_${course.courseName}_${course.grade}_${course.credits}`}
-                                      className={`year-row-tone-${((course.academicYear - 1) % 6) + 1}`}
-                                    >
-                                      <td>
-                                        <input
-                                          type="checkbox"
-                                          checked={selectedWorstCourseByKey[`${course.semesterId}_${course.courseId}`] ?? false}
-                                          onChange={(event) =>
-                                            toggleWorstCourseSelection(course.semesterId, course.courseId, event.target.checked)
-                                          }
-                                        />
-                                      </td>
-                                      <td>{index + 1}</td>
-                                      <td>{course.academicYear}</td>
-                                      <td>{course.semesterNumber}</td>
-                                      <td>{course.season}</td>
-                                      <td>{course.courseName}</td>
-                                      <td>{course.grade}</td>
-                                      <td>{course.credits.toFixed(1)}</td>
-                                      <td>{course.impactScore.toFixed(2)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                            {topWorstCourses.length > 5 && (
-                              <div className="actions-inline">
-                                {!showAllWorstCourses ? (
-                                  <button type="button" className="neutral" onClick={() => setShowAllWorstCourses(true)}>
-                                    Show All
-                                  </button>
-                                ) : (
-                                  <button type="button" className="neutral" onClick={() => setShowAllWorstCourses(false)}>
-                                    Hide All
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
+                        <div className="actions-inline">
+                          {topWorstCourses.length > 5 && (
+                            <button
+                              type="button"
+                              className="neutral"
+                              onClick={() => setShowAllWorstCourses((prev) => !prev)}
+                            >
+                              {showAllWorstCourses ? "Show Top 5" : `Show All (${topWorstCourses.length})`}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="neutral"
+                            disabled={selectedWorstCourses.length === 0}
+                            onClick={() => setSelectedWorstCourseByKey({})}
+                          >
+                            Clear Selection
+                          </button>
+                          <button
+                            type="button"
+                            disabled={selectedWorstCourses.length === 0}
+                            onClick={applySelectedAsBinary}
+                          >
+                            Apply {selectedWorstCourses.length > 0 ? `${selectedWorstCourses.length} ` : ""}as Binary
+                          </button>
+                        </div>
                       </>
                     )}
                   </>
                 )}
               </section>
-
-              <section className="semester-create">
-                <h3>Add Semester</h3>
-                <div className="row-fields">
-                  <label>
-                    Year
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={activeSemesterDraft.academicYear}
-                      onChange={(event) => handleSemesterDraftChange(activeProfile.id, { academicYear: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    Semester #
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={activeSemesterDraft.semesterNumber}
-                      onChange={(event) => handleSemesterDraftChange(activeProfile.id, { semesterNumber: event.target.value })}
-                    />
-                  </label>
-                  <label>
-                    Season
-                    <select
-                      value={activeSemesterDraft.season}
-                      onChange={(event) => handleSemesterDraftChange(activeProfile.id, { season: event.target.value as SemesterSeason })}
-                    >
-                      {SEASONS.map((season) => (
-                        <option key={season} value={season}>
-                          {season}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button type="button" onClick={() => handleAddSemester(activeProfile.id)}>
-                    Add Semester
-                  </button>
-                </div>
-              </section>
+                </>
+              )}
 
               <section className="semesters-list">
-                <div className="actions-inline">
-                  <button type="button" className="neutral" onClick={collapseAllSemesters}>
-                    Collapse All
-                  </button>
-                  <button type="button" className="neutral" onClick={showAllSemesters}>
-                    Show All
-                  </button>
-                </div>
-                {sortedActiveSemesters.map((semester) => {
-                  const semesterGpa = calculateSemesterGpa(semester.courses);
-                  const courseDraft = courseDraftBySemester[semester.id] ?? EMPTY_COURSE_DRAFT;
-                  const isEditingSemester = editingSemesterId === semester.id;
-                  const isCollapsed = collapsedSemesterById[semester.id] ?? true;
-                  const yearToneClass = `year-tone-${((semester.academicYear - 1) % 6) + 1}`;
+                {!isSearching && (
+                  <div className="actions-inline">
+                    <button
+                      type="button"
+                      className="neutral"
+                      disabled={!canCollapseAll}
+                      onClick={collapseAllSemesters}
+                    >
+                      Collapse All
+                    </button>
+                    <button
+                      type="button"
+                      className="neutral"
+                      disabled={!canExpandAll}
+                      onClick={showAllSemesters}
+                    >
+                      Expand All
+                    </button>
+                  </div>
+                )}
+                {visibleYearGroups.map((group) => {
+                  const yearToneClass = `year-tone-${((group.year - 1) % 6) + 1}`;
+                  const yearExpanded = isYearExpanded(group.year, group.matchCount);
+                  const yearBodyId = `year_body_${group.year}`;
 
                   return (
-                    <article key={semester.id} className={`semester-card ${yearToneClass}`}>
-                      <header>
-                        <h3>
-                          Year {semester.academicYear} | Semester {semester.semesterNumber} | {semester.season}
-                        </h3>
-                        <div className="actions-inline">
-                          <span className="gpa-pill">Semester GPA: {formatGpa(semesterGpa)}</span>
-                          <button type="button" className="neutral" onClick={() => toggleSemesterCollapsed(semester.id)}>
-                            {isCollapsed ? "Expand" : "Collapse"}
-                          </button>
-                          {isEditingSemester ? (
-                            <>
-                              <button type="button" onClick={() => saveEditSemester(activeProfile.id, semester.id)}>
-                                Save Semester
-                              </button>
-                              <button type="button" className="neutral" onClick={cancelEditSemester}>
-                                Cancel
-                              </button>
-                            </>
-                          ) : (
-                            <button type="button" className="neutral" onClick={() => beginEditSemester(semester)}>
-                              Edit Semester
-                            </button>
-                          )}
-                          <button type="button" className="danger" onClick={() => handleDeleteSemester(activeProfile.id, semester.id)}>
-                            Remove Semester
-                          </button>
-                        </div>
-                      </header>
+                    <div key={group.year} className={`year-group ${yearToneClass}`}>
+                      <button
+                        type="button"
+                        className="year-group-header"
+                        aria-expanded={yearExpanded}
+                        aria-controls={yearBodyId}
+                        disabled={isSearching}
+                        onClick={() => toggleYearCollapsed(group.year)}
+                      >
+                        <span className={yearExpanded ? "chevron is-open" : "chevron"} aria-hidden="true">
+                          ▸
+                        </span>
+                        <span className="group-title">Academic Year {group.year}</span>
+                        <span className="chip">{group.semesters.length} semester(s)</span>
+                        <span className="chip">{group.courseCount} course(s)</span>
+                        <span className="chip">{group.credits.toFixed(1)} credits</span>
+                        <span className="gpa-pill">GPA {formatGpa(group.gpa)}</span>
+                      </button>
+                      <div id={yearBodyId} className={yearExpanded ? "collapsible is-open" : "collapsible"}>
+                        <div className="collapsible-inner">
+                          <div className="year-group-body">
+                            {group.semesters.map((semester) => {
+                              const semesterGpa = calculateSemesterGpa(semester.courses);
+                              const courseDraft = courseDraftBySemester[semester.id] ?? EMPTY_COURSE_DRAFT;
+                              const isEditingSemester = editingSemesterId === semester.id;
+                              const isExpanded = isSemesterExpanded(semester.id);
+                              const semesterMatches = searchMatchesBySemester.get(semester.id);
+                              const summary = summarizeCourses(semester.courses);
+                              const semesterBodyId = `semester_body_${semester.id}`;
 
-                      {!isCollapsed && (
+                              return (
+                                <article key={semester.id} className={`semester-card ${yearToneClass}`}>
+                                  <div className="semester-head">
+                                    <button
+                                      type="button"
+                                      className="semester-toggle"
+                                      aria-expanded={isExpanded}
+                                      aria-controls={semesterBodyId}
+                                      disabled={isSearching}
+                                      onClick={() => toggleSemesterCollapsed(semester.id)}
+                                    >
+                                      <span className={isExpanded ? "chevron is-open" : "chevron"} aria-hidden="true">
+                                        ▸
+                                      </span>
+                                      <span className="group-title">
+                                        Semester {semester.semesterNumber} | {semester.season}
+                                      </span>
+                                      <span className="chip">{summary.count} course(s)</span>
+                                      <span className="chip">{summary.credits.toFixed(1)} credits</span>
+                                      {semesterMatches && (
+                                        <span className="chip is-hit">{semesterMatches.size} match(es)</span>
+                                      )}
+                                      <span className="gpa-pill">GPA {formatGpa(semesterGpa)}</span>
+                                    </button>
+                                    {isExpanded && (
+                                      <div className="semester-actions actions-inline">
+                                        {isEditingSemester ? (
+                                          <>
+                                            <button type="button" onClick={() => saveEditSemester(activeProfile.id, semester.id)}>
+                                              Save Semester
+                                            </button>
+                                            <button type="button" className="neutral" onClick={cancelEditSemester}>
+                                              Cancel
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <button type="button" className="neutral" onClick={() => beginEditSemester(semester)}>
+                                            Edit Semester
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          className="danger"
+                                          onClick={() => handleDeleteSemester(activeProfile.id, semester.id)}
+                                        >
+                                          Remove Semester
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div
+                                    id={semesterBodyId}
+                                    className={isExpanded ? "collapsible is-open" : "collapsible"}
+                                  >
+                                    <div className="collapsible-inner">
                         <div className="semester-body">
                           {isEditingSemester && (
                             <div className="semester-edit-grid">
@@ -1738,8 +2168,9 @@ export default function App() {
                               <tbody>
                                 {semester.courses.map((course) => {
                                   const isEditing = editingCourseId === course.id;
+                                  const isHit = semesterMatches?.has(course.id) ?? false;
                                   return (
-                                    <tr key={course.id}>
+                                    <tr key={course.id} className={isHit ? "row-hit" : undefined}>
                                       {isEditing ? (
                                         <>
                                           <td>
@@ -1777,7 +2208,7 @@ export default function App() {
                                         </>
                                       ) : (
                                         <>
-                                          <td>{course.name}</td>
+                                          <td>{highlightMatch(course.name, normalizedSearchQuery)}</td>
                                           <td>{course.credits.toFixed(1)}</td>
                                           <td>{course.grade === null ? "N/A" : course.grade}</td>
                                           <td>{course.isBinaryPass ? "Yes" : "No"}</td>
@@ -1807,19 +2238,99 @@ export default function App() {
                             </table>
                           </div>
                         </div>
-                      )}
-                    </article>
+                                    </div>
+                                  </div>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   );
                 })}
                 {sortedActiveSemesters.length === 0 && <div className="empty">No semesters yet. Add the first one above.</div>}
+                {isSearching && searchMatchCount === 0 && sortedActiveSemesters.length > 0 && (
+                  <div className="empty">No course names contain "{courseSearchQuery.trim()}".</div>
+                )}
               </section>
             </>
           )}
         </section>
       </main>
-      <footer style={{ textAlign: 'center', padding: '0.5rem', fontSize: '0.75rem', color: '#888' }}>
-        App version (Updated lately): {__BUILD_DATE__}
-      </footer>
+
+      {isAddSemesterOpen && activeProfile && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setIsAddSemesterOpen(false);
+          }}
+        >
+          <div className="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="add-semester-title">
+            <h3 id="add-semester-title">Add Semester</h3>
+            <div className="row-fields">
+              <label>
+                Year
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  autoFocus
+                  value={activeSemesterDraft.academicYear}
+                  onChange={(event) => handleSemesterDraftChange(activeProfile.id, { academicYear: event.target.value })}
+                />
+              </label>
+              <label>
+                Semester #
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={activeSemesterDraft.semesterNumber}
+                  onChange={(event) => handleSemesterDraftChange(activeProfile.id, { semesterNumber: event.target.value })}
+                />
+              </label>
+              <label>
+                Season
+                <select
+                  value={activeSemesterDraft.season}
+                  onChange={(event) => handleSemesterDraftChange(activeProfile.id, { season: event.target.value as SemesterSeason })}
+                >
+                  {SEASONS.map((season) => (
+                    <option key={season} value={season}>
+                      {season}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="neutral" onClick={() => setIsAddSemesterOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleAddSemester(activeProfile.id);
+                  setIsAddSemesterOpen(false);
+                }}
+              >
+                Add Semester
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <VersionFooter />
     </div>
+  );
+}
+
+function VersionFooter() {
+  return (
+    <footer className="app-version" title={`Commit ${__GIT_COMMIT__} · built ${__BUILD_DATE__}`}>
+      v{__APP_VERSION__} · {__GIT_COMMIT__} · {__BUILD_DATE__}
+    </footer>
   );
 }

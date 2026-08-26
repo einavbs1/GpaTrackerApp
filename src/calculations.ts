@@ -1,6 +1,6 @@
 import type { Course, Profile } from "./types";
 
-interface GpaAggregation {
+export interface GpaAggregation {
   qualityPoints: number;
   gradedCredits: number;
 }
@@ -56,6 +56,26 @@ export function calculateTotalEarnedCredits(profile: Profile): number {
   return profile.semesters
     .flatMap((semester) => semester.courses)
     .reduce((sum, course) => sum + course.credits, 0);
+}
+
+// Subtracts the given graded courses from a precomputed aggregate so each simulation stays O(1).
+export function gpaAfterBinarizing(
+  base: GpaAggregation,
+  binarized: Array<{ grade: number; credits: number }>
+): number | null {
+  const removed = binarized.reduce<GpaAggregation>(
+    (acc, course) => {
+      acc.qualityPoints += course.grade * course.credits;
+      acc.gradedCredits += course.credits;
+      return acc;
+    },
+    { qualityPoints: 0, gradedCredits: 0 }
+  );
+
+  return toGpa({
+    qualityPoints: base.qualityPoints - removed.qualityPoints,
+    gradedCredits: base.gradedCredits - removed.gradedCredits
+  });
 }
 
 export function formatGpa(value: number | null): string {

@@ -19,6 +19,7 @@ export interface Semester {
 export interface Profile {
   id: string;
   name: string;
+  binaryCreditCap: number | null;
   semesters: Semester[];
 }
 
@@ -35,6 +36,7 @@ export function createEmptyState(): AppState {
   const defaultProfile: Profile = {
     id: createId(),
     name: "Default Profile",
+    binaryCreditCap: null,
     semesters: []
   };
 
