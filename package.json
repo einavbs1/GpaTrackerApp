@@ -1,6 +1,6 @@
 {
   "name": "average-toar-calculate",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "private": true,
   "description": "Desktop/Web GPA calculator with local JSON persistence",
   "main": "electron/main.js",
