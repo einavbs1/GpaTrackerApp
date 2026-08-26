@@ -1,17 +1,24 @@
 ﻿{
     "nextBump":  "minor",
     "pending":  [
-                    "Fixed simulator dragging: it no longer stutters or ignores the first pointer movements",
-                    "Simulator panel can now be resized from its bottom-right corner",
-                    "Courses can now have an optional course code, shown in its own column and searchable",
-                    "Delete is hidden until a course row is put into edit mode",
-                    "Saving a course edit now asks for confirmation; cancelling only asks when there are unsaved changes",
-                    "Course rows are numbered and the edited row is highlighted",
-                    "Adding a semester now scrolls to it, expands it and focuses the course name field",
-                    "Add Course now shows a clear validation message instead of silently doing nothing",
-                    "Excel export includes the new CourseCode column"
+
                 ],
     "releases":  {
+                     "2.3.0":  {
+                                   "date":  "2026-08-26",
+                                   "type":  "minor",
+                                   "changes":  [
+                                                   "Fixed simulator dragging: it no longer stutters or ignores the first pointer movements",
+                                                   "Simulator panel can now be resized from its bottom-right corner",
+                                                   "Courses can now have an optional course code, shown in its own column and searchable",
+                                                   "Delete is hidden until a course row is put into edit mode",
+                                                   "Saving a course edit now asks for confirmation; cancelling only asks when there are unsaved changes",
+                                                   "Course rows are numbered and the edited row is highlighted",
+                                                   "Adding a semester now scrolls to it, expands it and focuses the course name field",
+                                                   "Add Course now shows a clear validation message instead of silently doing nothing",
+                                                   "Excel export includes the new CourseCode column"
+                                               ]
+                               },
                      "2.2.0":  {
                                    "date":  "2026-08-26",
                                    "type":  "minor",
