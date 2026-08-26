@@ -2,6 +2,9 @@
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   line-height: 1.4;
 
+  /* Clears the sticky topbar (12px offset + ~62px tall) so panes below never sit under it. */
+  --sticky-top: 86px;
+
   --bg-page:              #0e141f;
   --bg-panel:             #18202e;
   --bg-card:              #212c3d;
@@ -620,7 +623,7 @@ p {
 
 .profiles-panel {
   position: sticky;
-  top: 12px;
+  top: var(--sticky-top);
 }
 
 .profiles-panel h2 {
@@ -775,9 +778,21 @@ button:disabled:hover {
   letter-spacing: -1px;
 }
 
-.annual-block {
+.annual-block,
+.below-overall-block {
   display: grid;
   gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border-main);
+  background: var(--bg-card);
+  box-shadow: var(--elev-1);
+}
+
+.annual-block > h3,
+.below-overall-block > h3 {
+  font-size: 1.05rem;
+  color: var(--text-heading);
 }
 
 .annual-list {
@@ -792,11 +807,6 @@ button:disabled:hover {
   border-radius: 10px;
   padding: 10px 14px;
   background: var(--bg-annual);
-}
-
-.below-overall-block {
-  display: grid;
-  gap: 8px;
 }
 
 .below-overall-block h4 {
@@ -1055,6 +1065,9 @@ input:disabled {
 }
 
 .course-search-bar {
+  position: sticky;
+  top: var(--sticky-top);
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1063,7 +1076,7 @@ input:disabled {
   border-radius: 14px;
   border: 1px solid var(--border-stat);
   background: var(--bg-stat);
-  box-shadow: var(--elev-1);
+  box-shadow: var(--elev-2);
 }
 
 .course-search {
@@ -1112,6 +1125,11 @@ input:disabled {
 
 .modal-dialog h3 {
   font-size: 1.15rem;
+}
+
+.modal-dialog .row-fields {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  align-items: end;
 }
 
 .modal-actions {
