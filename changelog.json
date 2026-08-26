@@ -1,7 +1,11 @@
 ﻿{
     "nextBump":  "minor",
     "pending":  [
-
+                    "Remove Semester is now only visible while editing that semester",
+                    "Rebuilt the button system: flat surfaces, no gradients, no hover lift, visible focus rings",
+                    "Danger buttons are now outlined and only fill red on hover",
+                    "Row actions in the course table and profile sidebar are compact icon-only buttons with tooltips",
+                    "Added accent colour tokens so buttons follow the theme"
                 ],
     "releases":  {
                      "2.4.0":  {

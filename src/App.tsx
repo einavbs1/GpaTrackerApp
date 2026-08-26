@@ -1851,11 +1851,11 @@ export default function App() {
                   {isEditing ? (
                     <div className="edit-inline">
                       <input type="text" value={editingProfileName} onChange={(event) => setEditingProfileName(event.target.value)} />
-                      <button type="button" onClick={saveEditProfile}>
-                        <Icon name="check" /> Save
+                      <button type="button" className="icon-btn is-primary" title="Save name" aria-label="Save name" onClick={saveEditProfile}>
+                        <Icon name="check" />
                       </button>
-                      <button type="button" className="neutral" onClick={() => setEditingProfileId(null)}>
-                        <Icon name="x" /> Cancel
+                      <button type="button" className="icon-btn" title="Cancel" aria-label="Cancel" onClick={() => setEditingProfileId(null)}>
+                        <Icon name="x" />
                       </button>
                     </div>
                   ) : (
@@ -1864,11 +1864,11 @@ export default function App() {
                         {profile.name}
                       </button>
                       <div className="actions-inline">
-                        <button type="button" className="neutral" onClick={() => beginEditProfile(profile)}>
-                          <Icon name="pencil" /> Edit
+                        <button type="button" className="icon-btn" title="Rename profile" aria-label={`Rename ${profile.name}`} onClick={() => beginEditProfile(profile)}>
+                          <Icon name="pencil" />
                         </button>
-                        <button type="button" className="danger" onClick={() => handleDeleteProfile(profile.id)}>
-                          <Icon name="trash" /> Delete
+                        <button type="button" className="icon-btn danger" title="Delete profile" aria-label={`Delete ${profile.name}`} onClick={() => handleDeleteProfile(profile.id)}>
+                          <Icon name="trash" />
                         </button>
                       </div>
                     </>
@@ -2287,19 +2287,19 @@ export default function App() {
                                             <button type="button" className="neutral" onClick={cancelEditSemester}>
                                               <Icon name="x" /> Cancel
                                             </button>
+                                            <button
+                                              type="button"
+                                              className="danger"
+                                              onClick={() => handleDeleteSemester(activeProfile.id, semester.id)}
+                                            >
+                                              <Icon name="trash" /> Remove Semester
+                                            </button>
                                           </>
                                         ) : (
                                           <button type="button" className="neutral" onClick={() => beginEditSemester(semester)}>
                                             <Icon name="pencil" /> Edit Semester
                                           </button>
                                         )}
-                                        <button
-                                          type="button"
-                                          className="danger"
-                                          onClick={() => handleDeleteSemester(activeProfile.id, semester.id)}
-                                        >
-                                          <Icon name="trash" /> Remove Semester
-                                        </button>
                                       </div>
                                     )}
                                   </div>
@@ -2415,14 +2415,14 @@ export default function App() {
                                           </td>
                                           <td>
                                             <div className="actions-inline">
-                                              <button type="button" onClick={() => saveEditCourse(activeProfile.id, semester.id)}>
-                                                <Icon name="check" /> Save
+                                              <button type="button" className="icon-btn is-primary" title="Save changes" aria-label="Save changes" onClick={() => saveEditCourse(activeProfile.id, semester.id)}>
+                                                <Icon name="check" />
                                               </button>
-                                              <button type="button" className="neutral" onClick={cancelEditCourse}>
-                                                <Icon name="x" /> Cancel
+                                              <button type="button" className="icon-btn" title="Cancel" aria-label="Cancel" onClick={cancelEditCourse}>
+                                                <Icon name="x" />
                                               </button>
-                                              <button type="button" className="danger" onClick={() => handleDeleteCourse(activeProfile.id, semester.id, course.id)}>
-                                                <Icon name="trash" /> Delete
+                                              <button type="button" className="icon-btn danger" title="Delete course" aria-label="Delete course" onClick={() => handleDeleteCourse(activeProfile.id, semester.id, course.id)}>
+                                                <Icon name="trash" />
                                               </button>
                                             </div>
                                             {courseFormError && <div className="form-error">{courseFormError}</div>}
@@ -2439,8 +2439,8 @@ export default function App() {
                                           <td>{course.isBinaryPass ? "Yes" : "No"}</td>
                                           <td>
                                             <div className="actions-inline">
-                                              <button type="button" className="neutral" onClick={() => beginEditCourse(course)}>
-                                                <Icon name="pencil" /> Edit
+                                              <button type="button" className="icon-btn" title="Edit course" aria-label={`Edit ${course.name}`} onClick={() => beginEditCourse(course)}>
+                                                <Icon name="pencil" />
                                               </button>
                                             </div>
                                           </td>
