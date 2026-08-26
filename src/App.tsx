@@ -1,4 +1,4 @@
-import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   AuthCredential,
@@ -23,6 +23,7 @@ import {
   gpaAfterBinarizing
 } from "./calculations";
 import { auth, firebaseInitError, firebaseProjectId, googleProvider } from "./firebase";
+import { Icon } from "./Icon";
 import {
   buildDefaultState,
   isValidImportedState,
@@ -226,7 +227,9 @@ export default function App() {
   const [editingSemesterDraft, setEditingSemesterDraft] = useState<SemesterDraft>(EMPTY_SEMESTER_DRAFT);
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [editingCourseDraft, setEditingCourseDraft] = useState<CourseDraft>(EMPTY_COURSE_DRAFT);
-  const [showSimulator, setShowSimulator] = useState(false);
+  const [simulatorMode, setSimulatorMode] = useState<"closed" | "open" | "tab">("closed");
+  const [simPos, setSimPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDraggingSim, setIsDraggingSim] = useState(false);
   const [showAllWorstCourses, setShowAllWorstCourses] = useState(false);
   const [binarySortMode, setBinarySortMode] = useState<BinarySortMode>("impact");
   const [worstSemesterFilterById, setWorstSemesterFilterById] = useState<Record<string, boolean>>({});
@@ -242,6 +245,8 @@ export default function App() {
   const previousSerializedRef = useRef<string>("");
   const hasLoadedUserStateRef = useRef(false);
   const dataMenuRef = useRef<HTMLDivElement | null>(null);
+  const simPanelRef = useRef<HTMLDivElement | null>(null);
+  const simDragOffsetRef = useRef({ x: 0, y: 0 });
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
@@ -279,6 +284,35 @@ export default function App() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isAddSemesterOpen]);
 
+  useEffect(() => {
+    if (simulatorMode !== "open") return;
+
+    // Escape minimises rather than closes so an in-progress selection is not lost.
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setSimulatorMode("tab");
+    }
+
+    function handleResize() {
+      setSimPos((prev) => {
+        if (!prev) return prev;
+        const panel = simPanelRef.current;
+        const width = panel?.offsetWidth ?? 560;
+        const height = panel?.offsetHeight ?? 400;
+        return {
+          x: Math.min(Math.max(8, prev.x), Math.max(8, window.innerWidth - width - 8)),
+          y: Math.min(Math.max(8, prev.y), Math.max(8, window.innerHeight - height - 8))
+        };
+      });
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [simulatorMode]);
+
   function toggleTheme() {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
@@ -290,6 +324,40 @@ export default function App() {
   function runFromMenu(action: () => void) {
     setIsDataMenuOpen(false);
     action();
+  }
+
+  function clampSimPos(x: number, y: number) {
+    const panel = simPanelRef.current;
+    const width = panel?.offsetWidth ?? 560;
+    const height = panel?.offsetHeight ?? 400;
+    return {
+      x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - width - 8)),
+      y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - height - 8))
+    };
+  }
+
+  function handleSimDragStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button")) return;
+
+    const panel = simPanelRef.current;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    simDragOffsetRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsDraggingSim(true);
+  }
+
+  function handleSimDragMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!isDraggingSim) return;
+    const offset = simDragOffsetRef.current;
+    setSimPos(clampSimPos(event.clientX - offset.x, event.clientY - offset.y));
+  }
+
+  function handleSimDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!isDraggingSim) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    setIsDraggingSim(false);
   }
 
   useEffect(() => {
@@ -1417,7 +1485,7 @@ export default function App() {
               </div>
 
               <button type="button" className="primary-btn" onClick={handleEmailSignIn}>
-                Sign In
+                <Icon name="login" /> Sign In
               </button>
 
               <p className="auth-switch">
@@ -1480,7 +1548,7 @@ export default function App() {
               </div>
 
               <button type="button" className="primary-btn" onClick={handleRegister}>
-                Create Account
+                <Icon name="userPlus" /> Create Account
               </button>
             </>
           )}
@@ -1503,7 +1571,7 @@ export default function App() {
                 </label>
               </div>
               <button type="button" className="primary-btn" onClick={handleResetPassword}>
-                Send Reset Link
+                <Icon name="mail" /> Send Reset Link
               </button>
             </>
           )}
@@ -1584,13 +1652,13 @@ export default function App() {
             {isDataMenuOpen && (
               <div className="menu-popup" role="menu">
                 <button type="button" className="menu-item" role="menuitem" onClick={() => runFromMenu(handleDownloadBackup)}>
-                  <span aria-hidden="true">⬇️</span> Download Backup (JSON)
+                  <Icon name="download" /> Download Backup (JSON)
                 </button>
                 <button type="button" className="menu-item" role="menuitem" onClick={() => runFromMenu(handleExportExcel)}>
-                  <span aria-hidden="true">📊</span> Export To Excel
+                  <Icon name="sheet" /> Export To Excel
                 </button>
                 <label className="menu-item" role="menuitem">
-                  <span aria-hidden="true">⬆️</span> Upload Backup (JSON)
+                  <Icon name="upload" /> Upload Backup (JSON)
                   <input
                     type="file"
                     accept=".json,application/json"
@@ -1656,10 +1724,10 @@ export default function App() {
                     <div className="edit-inline">
                       <input type="text" value={editingProfileName} onChange={(event) => setEditingProfileName(event.target.value)} />
                       <button type="button" onClick={saveEditProfile}>
-                        Save
+                        <Icon name="check" /> Save
                       </button>
                       <button type="button" className="neutral" onClick={() => setEditingProfileId(null)}>
-                        Cancel
+                        <Icon name="x" /> Cancel
                       </button>
                     </div>
                   ) : (
@@ -1669,10 +1737,10 @@ export default function App() {
                       </button>
                       <div className="actions-inline">
                         <button type="button" className="neutral" onClick={() => beginEditProfile(profile)}>
-                          Edit
+                          <Icon name="pencil" /> Edit
                         </button>
                         <button type="button" className="danger" onClick={() => handleDeleteProfile(profile.id)}>
-                          Delete
+                          <Icon name="trash" /> Delete
                         </button>
                       </div>
                     </>
@@ -1702,12 +1770,12 @@ export default function App() {
                   />
                   {isSearching && (
                     <button type="button" className="neutral" onClick={() => setCourseSearchQuery("")}>
-                      Clear
+                      <Icon name="x" /> Clear
                     </button>
                   )}
                 </div>
                 <button type="button" className="add-semester-btn" onClick={() => setIsAddSemesterOpen(true)}>
-                  <span aria-hidden="true">＋</span> Add Semester
+                  <Icon name="plus" /> Add Semester
                 </button>
               </div>
               {isSearching && (
@@ -1752,18 +1820,57 @@ export default function App() {
                   {Object.keys(annualGpas).length === 0 && <div className="muted">No annual GPA available yet.</div>}
                 </div>
               </section>
+                </>
+              )}
 
               <section className="below-overall-block binary-simulator">
                 <h3>Binary Pass Simulator</h3>
                 <p className="muted">
-                  Tick any course below to watch your overall GPA update live, as if that grade were switched to pass/fail.
+                  See what your overall GPA would become if a course were switched to pass/fail. Opens in a panel you can
+                  drag aside while you browse.
                 </p>
                 <div className="actions-inline">
-                  <button type="button" className="neutral" onClick={() => setShowSimulator((prev) => !prev)}>
-                    {showSimulator ? "Hide Simulator" : "Open Simulator"}
+                  <button type="button" onClick={() => setSimulatorMode("open")}>
+                    <Icon name="calculator" /> Open Simulator
                   </button>
                 </div>
-                {!showSimulator ? null : overallGpa === null ? (
+              </section>
+
+      {simulatorMode === "tab" && (
+        <button type="button" className="sim-tab" onClick={() => setSimulatorMode("open")}>
+          <Icon name="calculator" /> Binary Simulator
+        </button>
+      )}
+
+      {simulatorMode === "open" && (
+        <div
+          className={isDraggingSim ? "sim-panel is-dragging" : "sim-panel"}
+          ref={simPanelRef}
+          role="dialog"
+          aria-label="Binary Pass Simulator"
+          style={simPos ? { left: `${simPos.x}px`, top: `${simPos.y}px`, right: "auto", bottom: "auto" } : undefined}
+        >
+          <div
+            className="sim-panel-header"
+            onPointerDown={handleSimDragStart}
+            onPointerMove={handleSimDragMove}
+            onPointerUp={handleSimDragEnd}
+            onPointerCancel={handleSimDragEnd}
+          >
+            <span className="sim-panel-grip" aria-hidden="true">
+              <Icon name="drag" />
+            </span>
+            <span className="sim-panel-title">Binary Pass Simulator</span>
+            <button type="button" className="icon-btn" title="Hide to side" aria-label="Hide to side" onClick={() => setSimulatorMode("tab")}>
+              <Icon name="minimize" />
+            </button>
+            <button type="button" className="icon-btn" title="Close" aria-label="Close" onClick={() => setSimulatorMode("closed")}>
+              <Icon name="x" />
+            </button>
+          </div>
+
+          <div className="sim-panel-body">
+                {overallGpa === null ? (
                   <div className="muted">Overall GPA is not available yet.</div>
                 ) : coursesBelowOverall.length === 0 ? (
                   <div className="muted">No non-binary courses are below your current overall GPA ({formatGpa(overallGpa)}).</div>
@@ -1829,10 +1936,10 @@ export default function App() {
                       </summary>
                       <div className="actions-inline">
                         <button type="button" className="neutral" onClick={() => setAllWorstSemesters(true)}>
-                          Select All
+                          <Icon name="check" /> Select All
                         </button>
                         <button type="button" className="neutral" onClick={() => setAllWorstSemesters(false)}>
-                          Clear All
+                          <Icon name="x" /> Clear All
                         </button>
                       </div>
                       <div className="worst-semester-filter-grid">
@@ -1924,6 +2031,7 @@ export default function App() {
                               className="neutral"
                               onClick={() => setShowAllWorstCourses((prev) => !prev)}
                             >
+                              <Icon name={showAllWorstCourses ? "collapse" : "expand"} />
                               {showAllWorstCourses ? "Show Top 5" : `Show All (${topWorstCourses.length})`}
                             </button>
                           )}
@@ -1933,13 +2041,14 @@ export default function App() {
                             disabled={selectedWorstCourses.length === 0}
                             onClick={() => setSelectedWorstCourseByKey({})}
                           >
-                            Clear Selection
+                            <Icon name="eraser" /> Clear Selection
                           </button>
                           <button
                             type="button"
                             disabled={selectedWorstCourses.length === 0}
                             onClick={applySelectedAsBinary}
                           >
+                            <Icon name="apply" />
                             Apply {selectedWorstCourses.length > 0 ? `${selectedWorstCourses.length} ` : ""}as Binary
                           </button>
                         </div>
@@ -1947,9 +2056,9 @@ export default function App() {
                     )}
                   </>
                 )}
-              </section>
-                </>
-              )}
+          </div>
+        </div>
+      )}
 
               <section className="semesters-list">
                 {!isSearching && (
@@ -1960,7 +2069,7 @@ export default function App() {
                       disabled={!canCollapseAll}
                       onClick={collapseAllSemesters}
                     >
-                      Collapse All
+                      <Icon name="collapse" /> Collapse All
                     </button>
                     <button
                       type="button"
@@ -1968,7 +2077,7 @@ export default function App() {
                       disabled={!canExpandAll}
                       onClick={showAllSemesters}
                     >
-                      Expand All
+                      <Icon name="expand" /> Expand All
                     </button>
                   </div>
                 )}
@@ -2037,15 +2146,15 @@ export default function App() {
                                         {isEditingSemester ? (
                                           <>
                                             <button type="button" onClick={() => saveEditSemester(activeProfile.id, semester.id)}>
-                                              Save Semester
+                                              <Icon name="check" /> Save Semester
                                             </button>
                                             <button type="button" className="neutral" onClick={cancelEditSemester}>
-                                              Cancel
+                                              <Icon name="x" /> Cancel
                                             </button>
                                           </>
                                         ) : (
                                           <button type="button" className="neutral" onClick={() => beginEditSemester(semester)}>
-                                            Edit Semester
+                                            <Icon name="pencil" /> Edit Semester
                                           </button>
                                         )}
                                         <button
@@ -2053,7 +2162,7 @@ export default function App() {
                                           className="danger"
                                           onClick={() => handleDeleteSemester(activeProfile.id, semester.id)}
                                         >
-                                          Remove Semester
+                                          <Icon name="trash" /> Remove Semester
                                         </button>
                                       </div>
                                     )}
@@ -2149,7 +2258,7 @@ export default function App() {
                                 Binary Pass (Pass/Fail)
                               </label>
                               <button type="button" onClick={() => handleAddCourse(activeProfile.id, semester.id)}>
-                                Add Course
+                                <Icon name="plus" /> Add Course
                               </button>
                             </div>
                           </div>
@@ -2198,10 +2307,10 @@ export default function App() {
                                           <td>
                                             <div className="actions-inline">
                                               <button type="button" onClick={() => saveEditCourse(activeProfile.id, semester.id)}>
-                                                Save
+                                                <Icon name="check" /> Save
                                               </button>
                                               <button type="button" className="neutral" onClick={cancelEditCourse}>
-                                                Cancel
+                                                <Icon name="x" /> Cancel
                                               </button>
                                             </div>
                                           </td>
@@ -2215,10 +2324,10 @@ export default function App() {
                                           <td>
                                             <div className="actions-inline">
                                               <button type="button" className="neutral" onClick={() => beginEditCourse(course)}>
-                                                Edit
+                                                <Icon name="pencil" /> Edit
                                               </button>
                                               <button type="button" className="danger" onClick={() => handleDeleteCourse(activeProfile.id, semester.id, course.id)}>
-                                                Delete
+                                                <Icon name="trash" /> Delete
                                               </button>
                                             </div>
                                           </td>
@@ -2306,7 +2415,7 @@ export default function App() {
             </div>
             <div className="modal-actions">
               <button type="button" className="neutral" onClick={() => setIsAddSemesterOpen(false)}>
-                Cancel
+                <Icon name="x" /> Cancel
               </button>
               <button
                 type="button"
@@ -2315,7 +2424,7 @@ export default function App() {
                   setIsAddSemesterOpen(false);
                 }}
               >
-                Add Semester
+                <Icon name="plus" /> Add Semester
               </button>
             </div>
           </div>

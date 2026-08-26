@@ -1,6 +1,12 @@
 {
   "nextBump": "minor",
-  "pending": [],
+  "pending": [
+    "Binary Pass Simulator now opens as a draggable floating panel instead of an inline table",
+    "Simulator can be hidden to a tab on the right edge and restored with selections intact",
+    "Simulator stays usable while browsing and searching the site",
+    "Inline SVG icon set added across every button (profiles, semesters, courses, simulator, auth, data menu)",
+    "Emoji icons in the data menu replaced with theme-aware SVGs"
+  ],
   "releases": {
     "2.1.0": {
       "date": "2026-08-26",
