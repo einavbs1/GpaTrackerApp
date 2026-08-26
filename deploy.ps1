@@ -21,15 +21,21 @@
 .PARAMETER SkipVerify
     Skip the post-deploy check that the live site is serving the assets just built.
 
-.PARAMETER Bump
-    Semver part to bump before deploying: patch (default), minor, major, or none.
-    Each bump commits package.json and creates a vX.Y.Z tag so the deploy can be reverted.
-
 .PARAMETER AllowDirty
-    Allow deploying with uncommitted changes. The version tag will not match what ships.
+    Deploy even with uncommitted changes. The build will be marked +dirty in the footer
+    and cannot be reproduced from git.
+
+.PARAMETER Bump
+    Release this deploy as a new version: minor (features, UI changes, fixes) or
+    major (breaking changes, redesigns). Requires a clean tree. Runs `npm version`,
+    which creates the release commit and the vX.Y.Z tag. Nothing is bumped without it.
+    Patch is intentionally not offered.
+
+.NOTES
+    Nothing touches git unless you pass -Bump. Your own work is never auto-committed.
 
 .EXAMPLE
-    .\deploy.ps1 -Open
+    .\deploy.ps1 -Bump minor -Open
 #>
 [CmdletBinding()]
 param(
@@ -39,9 +45,9 @@ param(
     [switch]$Open,
     [switch]$SkipRules,
     [switch]$SkipVerify,
-    [ValidateSet('patch', 'minor', 'major', 'none')]
-    [string]$Bump = 'patch',
-    [switch]$AllowDirty
+    [switch]$AllowDirty,
+    [ValidateSet('minor', 'major', 'none')]
+    [string]$Bump = 'none'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -109,30 +115,46 @@ try {
         Assert-LastExitCode "Type check"
     }
 
-    $taggedVersion = $null
-    if ($Bump -ne 'none') {
-        Write-Step "Versioning"
-        $isRepo = (git rev-parse --is-inside-work-tree 2>$null) -eq 'true'
-        if (-not $isRepo) {
-            throw "Not a git repository, so this deploy could not be tagged. Use -Bump none to deploy without a revert point."
-        }
+    $version = (Get-Content (Join-Path $PSScriptRoot 'package.json') -Raw | ConvertFrom-Json).version
+    $headTag = $null
 
-        # A tag only makes a deploy revertible if the deployed code is actually committed.
+    Write-Step "Checking the revert point"
+    if ((git rev-parse --is-inside-work-tree 2>$null) -ne 'true') {
+        Write-Host "Not a git repository; this deploy has no revert point." -ForegroundColor Yellow
+    }
+    else {
+        # A version is only revertible if the shipped code is committed and tagged.
         $dirty = git status --porcelain
         if ($dirty -and -not $AllowDirty) {
             Write-Host ($dirty | Out-String) -ForegroundColor Yellow
-            throw "Uncommitted changes present. Commit them first so the version tag matches what ships, or pass -AllowDirty."
+            throw "Uncommitted changes present. Commit your work first, then re-run with -Bump minor or -Bump major. Pass -AllowDirty to deploy anyway."
         }
 
-        npm version $Bump --no-git-tag-version | Out-Null
-        Assert-LastExitCode "npm version"
+        if ($Bump -ne 'none') {
+            if ($dirty) {
+                throw "-Bump needs a clean tree so the tag matches what ships. Commit your work first."
+            }
 
-        $taggedVersion = (Get-Content (Join-Path $PSScriptRoot 'package.json') -Raw | ConvertFrom-Json).version
-        git add package.json package-lock.json 2>$null
-        git commit -m "release: v$taggedVersion" | Out-Null
-        git tag -a "v$taggedVersion" -m "Release v$taggedVersion" | Out-Null
-        Write-Host "Tagged v$taggedVersion" -ForegroundColor Green
+            # npm version makes the release commit and the vX.Y.Z tag itself.
+            npm version $Bump
+            Assert-LastExitCode "npm version $Bump"
+            $version = (Get-Content (Join-Path $PSScriptRoot 'package.json') -Raw | ConvertFrom-Json).version
+            Write-Host "Bumped to v$version ($Bump)" -ForegroundColor Green
+        }
+
+        $headTag = (git tag --points-at HEAD | Select-Object -First 1)
+        if ($dirty) {
+            Write-Host "Deploying a DIRTY tree. The footer will show +dirty and this build cannot be reproduced from git." -ForegroundColor Yellow
+        }
+        elseif (-not $headTag) {
+            Write-Host "HEAD is not tagged, so there is no named revert point for this deploy." -ForegroundColor Yellow
+            Write-Host "To create one, re-run with -Bump minor (features/changes) or -Bump major (breaking/redesign)." -ForegroundColor DarkGray
+        }
+        else {
+            Write-Host "Revert point: $headTag" -ForegroundColor Green
+        }
     }
+    Write-Host "Version: v$version" -ForegroundColor DarkGray
 
     Write-Step "Building production bundle"
     npm run build
@@ -195,9 +217,9 @@ try {
 
     Write-Host ""
     Write-Host "Deployed: $url" -ForegroundColor Green
-    if ($taggedVersion) {
-        Write-Host "Version:  v$taggedVersion" -ForegroundColor Green
-        Write-Host "Revert:   git checkout v$taggedVersion; .\deploy.ps1 -Bump none" -ForegroundColor DarkGray
+    Write-Host "Version:  v$version" -ForegroundColor Green
+    if ($headTag) {
+        Write-Host "Revert:   git checkout $headTag; .\deploy.ps1" -ForegroundColor DarkGray
     }
 
     if ($Open) {
