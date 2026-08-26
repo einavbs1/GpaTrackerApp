@@ -26,16 +26,15 @@
     and cannot be reproduced from git.
 
 .PARAMETER Bump
-    Release this deploy as a new version: minor (features, UI changes, fixes) or
-    major (breaking changes, redesigns). Requires a clean tree. Runs `npm version`,
-    which creates the release commit and the vX.Y.Z tag. Nothing is bumped without it.
-    Patch is intentionally not offered.
+    One-off override of the bump type for this run. Normally you do not pass this:
+    the bump is read from "nextBump" in changelog.json.
 
 .NOTES
-    Nothing touches git unless you pass -Bump. Your own work is never auto-committed.
+    Release flow: put your notes in changelog.json "pending", set "nextBump"
+    (minor or major), commit your work, then just run .\deploy.ps1
 
 .EXAMPLE
-    .\deploy.ps1 -Bump minor -Open
+    .\deploy.ps1 -Open
 #>
 [CmdletBinding()]
 param(
@@ -46,8 +45,8 @@ param(
     [switch]$SkipRules,
     [switch]$SkipVerify,
     [switch]$AllowDirty,
-    [ValidateSet('minor', 'major', 'none')]
-    [string]$Bump = 'none'
+    [ValidateSet('minor', 'major', 'patch', 'none')]
+    [string]$Bump
 )
 
 $ErrorActionPreference = 'Stop'
@@ -83,6 +82,45 @@ function Test-LiveAsset {
     return 'ok'
 }
 
+function Step-Version {
+    param([string]$Current, [string]$Part)
+
+    $parts = $Current.Split('.')
+    $major = [int]$parts[0]; $minor = [int]$parts[1]; $patch = [int]$parts[2]
+
+    switch ($Part) {
+        'major' { return "$($major + 1).0.0" }
+        'minor' { return "$major.$($minor + 1).0" }
+        'patch' { return "$major.$minor.$($patch + 1)" }
+    }
+    throw "Unknown bump part '$Part'. Use major, minor, patch or none."
+}
+
+# Moves changelog.pending into releases[version], then resets pending for the next cycle.
+function Update-Changelog {
+    param([string]$Version, [string]$Part)
+
+    $entry = [ordered]@{
+        date    = (Get-Date -Format 'yyyy-MM-dd')
+        type    = $Part
+        changes = @($changelog.pending)
+    }
+
+    if ($entry.changes.Count -eq 0) {
+        $entry.changes = @("No changelog entries recorded for this release.")
+        Write-Host "changelog.json 'pending' was empty; recorded a placeholder." -ForegroundColor Yellow
+    }
+
+    $releases = [ordered]@{ $Version = $entry }
+    foreach ($property in $changelog.releases.PSObject.Properties) {
+        $releases[$property.Name] = $property.Value
+    }
+
+    $changelog.releases = [pscustomobject]$releases
+    $changelog.pending = @()
+    $changelog | ConvertTo-Json -Depth 8 | Set-Content $changelogPath -Encoding UTF8
+}
+
 Push-Location $PSScriptRoot
 try {
     if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
@@ -103,6 +141,12 @@ try {
     Write-Host "Project: $Project" -ForegroundColor DarkGray
     Write-Host "Site:    $site" -ForegroundColor DarkGray
 
+    $changelogPath = Join-Path $PSScriptRoot 'changelog.json'
+    if (-not (Test-Path $changelogPath)) {
+        throw "changelog.json not found. It holds nextBump and the release history."
+    }
+    $changelog = Get-Content $changelogPath -Raw | ConvertFrom-Json
+
     if ($Install -or -not (Test-Path (Join-Path $PSScriptRoot 'node_modules'))) {
         Write-Step "Installing dependencies"
         npm install
@@ -118,7 +162,7 @@ try {
     $version = (Get-Content (Join-Path $PSScriptRoot 'package.json') -Raw | ConvertFrom-Json).version
     $headTag = $null
 
-    Write-Step "Checking the revert point"
+    Write-Step "Releasing"
     if ((git rev-parse --is-inside-work-tree 2>$null) -ne 'true') {
         Write-Host "Not a git repository; this deploy has no revert point." -ForegroundColor Yellow
     }
@@ -127,19 +171,32 @@ try {
         $dirty = git status --porcelain
         if ($dirty -and -not $AllowDirty) {
             Write-Host ($dirty | Out-String) -ForegroundColor Yellow
-            throw "Uncommitted changes present. Commit your work first, then re-run with -Bump minor or -Bump major. Pass -AllowDirty to deploy anyway."
+            throw "Uncommitted changes present. Commit your work first, then run .\deploy.ps1 again."
         }
 
-        if ($Bump -ne 'none') {
-            if ($dirty) {
-                throw "-Bump needs a clean tree so the tag matches what ships. Commit your work first."
-            }
+        $effectiveBump = if ($Bump) { $Bump } else { $changelog.nextBump }
+        if (-not $effectiveBump) { $effectiveBump = 'minor' }
 
-            # npm version makes the release commit and the vX.Y.Z tag itself.
-            npm version $Bump
-            Assert-LastExitCode "npm version $Bump"
-            $version = (Get-Content (Join-Path $PSScriptRoot 'package.json') -Raw | ConvertFrom-Json).version
-            Write-Host "Bumped to v$version ($Bump)" -ForegroundColor Green
+        if ($dirty) {
+            Write-Host "Dirty tree: skipping the version bump." -ForegroundColor Yellow
+        }
+        elseif ($effectiveBump -eq 'none') {
+            Write-Host "nextBump is 'none'; redeploying v$version unchanged." -ForegroundColor DarkGray
+        }
+        else {
+            $version = Step-Version -Current $version -Part $effectiveBump
+            Write-Host "Releasing v$version ($effectiveBump)" -ForegroundColor Green
+
+            npm version $version --no-git-tag-version --allow-same-version | Out-Null
+            Assert-LastExitCode "npm version"
+
+            Update-Changelog -Version $version -Part $effectiveBump
+
+            git add package.json package-lock.json changelog.json
+            git commit -m "release: v$version" | Out-Null
+            Assert-LastExitCode "git commit"
+            git tag -a "v$version" -m "Release v$version" | Out-Null
+            Assert-LastExitCode "git tag"
         }
 
         $headTag = (git tag --points-at HEAD | Select-Object -First 1)
@@ -148,7 +205,6 @@ try {
         }
         elseif (-not $headTag) {
             Write-Host "HEAD is not tagged, so there is no named revert point for this deploy." -ForegroundColor Yellow
-            Write-Host "To create one, re-run with -Bump minor (features/changes) or -Bump major (breaking/redesign)." -ForegroundColor DarkGray
         }
         else {
             Write-Host "Revert point: $headTag" -ForegroundColor Green

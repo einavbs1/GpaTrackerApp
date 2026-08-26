@@ -1,0 +1,38 @@
+{
+  "nextBump": "minor",
+  "pending": [],
+  "releases": {
+    "2.1.0": {
+      "date": "2026-08-26",
+      "type": "minor",
+      "changes": [
+        "Binary Pass Simulator and Annual GPA moved onto their own card surfaces",
+        "Fixed Add Semester modal field alignment (empty fourth grid column removed)",
+        "Search and Add Semester bar now pins below the topbar when scrolling",
+        "Profiles sidebar sticky offset aligned so pinned layers no longer collide"
+      ]
+    },
+    "2.0.0": {
+      "date": "2026-08-26",
+      "type": "major",
+      "changes": [
+        "Rebuilt colour system with a real elevation scale; removed all transparency from both themes",
+        "Compact sticky topbar with brand, user chip and icon actions",
+        "Theme toggle replaced with a sun/moon icon button on both topbar and landing",
+        "Exports moved into a floating data menu (JSON download, Excel, upload, last-modified)",
+        "Add Semester converted from an inline form to a modal",
+        "Homepage reorganised: search and add card first, then stats, annual GPA, simulator, semesters",
+        "Version footer showing version, commit and build date on every screen"
+      ]
+    },
+    "1.0.1": {
+      "date": "2026-08-26",
+      "type": "patch",
+      "changes": [
+        "Live binary-pass simulation with per-course impact preview and editable credit cap",
+        "Semester accordion with year grouping, animation and live course search",
+        "Confirmation prompts added to profile, semester and course deletion"
+      ]
+    }
+  }
+}
