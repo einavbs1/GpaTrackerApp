@@ -184,6 +184,8 @@ try {
             Write-Host "nextBump is 'none'; redeploying v$version unchanged." -ForegroundColor DarkGray
         }
         else {
+            # Captured before Update-Changelog empties pending, so the commit body is not blank.
+            $releaseNotes = @($changelog.pending)
             $version = Step-Version -Current $version -Part $effectiveBump
             Write-Host "Releasing v$version ($effectiveBump)" -ForegroundColor Green
 
@@ -192,8 +194,14 @@ try {
 
             Update-Changelog -Version $version -Part $effectiveBump
 
+            $commitArgs = @('commit', '-m', "feat: bump version to $version")
+            if ($releaseNotes.Count -gt 0) {
+                $commitArgs += '-m'
+                $commitArgs += (($releaseNotes | ForEach-Object { "- $_" }) -join "`n")
+            }
+
             git add package.json package-lock.json changelog.json
-            git commit -m "release: v$version" | Out-Null
+            git @commitArgs | Out-Null
             Assert-LastExitCode "git commit"
             git tag -a "v$version" -m "Release v$version" | Out-Null
             Assert-LastExitCode "git tag"
