@@ -56,6 +56,7 @@ export function normalizeState(input: unknown): AppState {
                   const isBinaryPass = Boolean(course.isBinaryPass);
                   return {
                     id: typeof course.id === "string" ? course.id : createId(),
+                    code: typeof course.code === "string" ? course.code : "",
                     name: typeof course.name === "string" ? course.name : "Unnamed Course",
                     credits: typeof course.credits === "number" ? course.credits : 0,
                     grade: typeof course.grade === "number" ? course.grade : null,
@@ -136,11 +137,13 @@ export function isValidImportedState(input: unknown): input is AppState {
         }
 
         const validGrade = course.grade === null || typeof course.grade === "number";
+        const validCode = course.code === undefined || typeof course.code === "string";
         if (
           typeof course.id !== "string" ||
           typeof course.name !== "string" ||
           typeof course.credits !== "number" ||
           !validGrade ||
+          !validCode ||
           typeof course.isBinaryPass !== "boolean"
         ) {
           return false;

@@ -2,6 +2,7 @@ export type SemesterSeason = "Winter A" | "Spring B" | "Summer";
 
 export interface Course {
   id: string;
+  code: string;
   name: string;
   credits: number;
   grade: number | null;

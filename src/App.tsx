@@ -34,6 +34,7 @@ import {
 import { SEASONS, createId, type AppState, type Course, type Profile, type Semester, type SemesterSeason } from "./types";
 
 type CourseDraft = {
+  code: string;
   name: string;
   credits: string;
   grade: string;
@@ -83,6 +84,7 @@ type SemesterDraft = {
 };
 
 const EMPTY_COURSE_DRAFT: CourseDraft = {
+  code: "",
   name: "",
   credits: "",
   grade: "",
@@ -177,27 +179,39 @@ function touch(state: AppState): AppState {
   };
 }
 
-function parseCourseDraft(draft: CourseDraft): Omit<Course, "id"> | null {
-  const name = draft.name.trim();
-  if (!name) return null;
+function validateCourseDraft(draft: CourseDraft): string | null {
+  if (!draft.name.trim()) return "Course name is required.";
 
   const credits = Number(draft.credits);
-  if (!Number.isFinite(credits) || credits <= 0) return null;
+  if (draft.credits.trim() === "" || !Number.isFinite(credits) || credits <= 0) {
+    return "Credits must be a number greater than 0.";
+  }
 
   const gradeText = draft.grade.trim();
-
   if (gradeText === "") {
-    // Grade is optional for binary pass courses, required otherwise.
-    if (draft.isBinaryPass) {
-      return { name, credits, grade: null, isBinaryPass: true };
-    }
-    return null;
+    return draft.isBinaryPass ? null : "Grade is required unless the course is binary pass.";
   }
 
   const grade = Number(gradeText);
-  if (!Number.isFinite(grade) || grade < 0 || grade > 100) return null;
+  if (!Number.isFinite(grade) || grade < 0 || grade > 100) return "Grade must be between 0 and 100.";
 
-  return { name, credits, grade, isBinaryPass: draft.isBinaryPass };
+  return null;
+}
+
+function parseCourseDraft(draft: CourseDraft): Omit<Course, "id"> | null {
+  if (validateCourseDraft(draft) !== null) return null;
+
+  const code = draft.code.trim();
+  const name = draft.name.trim();
+  const credits = Number(draft.credits);
+  const gradeText = draft.grade.trim();
+
+  // Grade stays null for binary pass courses, which are excluded from the GPA.
+  if (gradeText === "") {
+    return { code, name, credits, grade: null, isBinaryPass: true };
+  }
+
+  return { code, name, credits, grade: Number(gradeText), isBinaryPass: draft.isBinaryPass };
 }
 
 export default function App() {
@@ -227,6 +241,9 @@ export default function App() {
   const [editingSemesterDraft, setEditingSemesterDraft] = useState<SemesterDraft>(EMPTY_SEMESTER_DRAFT);
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [editingCourseDraft, setEditingCourseDraft] = useState<CourseDraft>(EMPTY_COURSE_DRAFT);
+  const [courseFormError, setCourseFormError] = useState<string | null>(null);
+  const [courseFormErrorBySemester, setCourseFormErrorBySemester] = useState<Record<string, string | null>>({});
+  const [focusSemesterId, setFocusSemesterId] = useState<string | null>(null);
   const [simulatorMode, setSimulatorMode] = useState<"closed" | "open" | "tab">("closed");
   const [simPos, setSimPos] = useState<{ x: number; y: number } | null>(null);
   const [isDraggingSim, setIsDraggingSim] = useState(false);
@@ -247,6 +264,10 @@ export default function App() {
   const dataMenuRef = useRef<HTMLDivElement | null>(null);
   const simPanelRef = useRef<HTMLDivElement | null>(null);
   const simDragOffsetRef = useRef({ x: 0, y: 0 });
+  const isDraggingSimRef = useRef(false);
+  const editingCourseOriginalRef = useRef<CourseDraft | null>(null);
+  const semesterNodeRefs = useRef<Record<string, HTMLElement | null>>({});
+  const courseNameInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
@@ -326,6 +347,18 @@ export default function App() {
     action();
   }
 
+  useEffect(() => {
+    if (!focusSemesterId) return;
+
+    const frame = requestAnimationFrame(() => {
+      semesterNodeRefs.current[focusSemesterId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+      courseNameInputRefs.current[focusSemesterId]?.focus();
+      setFocusSemesterId(null);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [focusSemesterId]);
+
   function clampSimPos(x: number, y: number) {
     const panel = simPanelRef.current;
     const width = panel?.offsetWidth ?? 560;
@@ -344,19 +377,42 @@ export default function App() {
 
     const rect = panel.getBoundingClientRect();
     simDragOffsetRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+
+    // Pin the current geometry so the CSS right/bottom anchoring stops fighting left/top.
+    panel.style.left = `${rect.left}px`;
+    panel.style.top = `${rect.top}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+
     event.currentTarget.setPointerCapture(event.pointerId);
+    isDraggingSimRef.current = true;
     setIsDraggingSim(true);
   }
 
+  // Writes straight to the DOM during the drag; committing to state per pointermove
+  // re-renders the whole simulator table and makes it stutter.
   function handleSimDragMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!isDraggingSim) return;
+    if (!isDraggingSimRef.current) return;
+
+    const panel = simPanelRef.current;
+    if (!panel) return;
+
     const offset = simDragOffsetRef.current;
-    setSimPos(clampSimPos(event.clientX - offset.x, event.clientY - offset.y));
+    const next = clampSimPos(event.clientX - offset.x, event.clientY - offset.y);
+    panel.style.left = `${next.x}px`;
+    panel.style.top = `${next.y}px`;
   }
 
   function handleSimDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!isDraggingSim) return;
+    if (!isDraggingSimRef.current) return;
+
+    isDraggingSimRef.current = false;
     event.currentTarget.releasePointerCapture(event.pointerId);
+
+    const panel = simPanelRef.current;
+    if (panel) {
+      setSimPos({ x: parseFloat(panel.style.left) || 0, y: parseFloat(panel.style.top) || 0 });
+    }
     setIsDraggingSim(false);
   }
 
@@ -451,7 +507,11 @@ export default function App() {
 
     for (const semester of sortedActiveSemesters) {
       const hits = semester.courses
-        .filter((course) => course.name.toLowerCase().includes(normalizedSearchQuery))
+        .filter(
+          (course) =>
+            course.name.toLowerCase().includes(normalizedSearchQuery) ||
+            course.code.toLowerCase().includes(normalizedSearchQuery)
+        )
         .map((course) => course.id);
       if (hits.length > 0) {
         matches.set(semester.id, new Set(hits));
@@ -812,6 +872,7 @@ export default function App() {
         AcademicYear: semester.academicYear,
         SemesterNumber: semester.semesterNumber,
         Season: semester.season,
+        CourseCode: course.code,
         Course: course.name,
         Credits: course.credits,
         Grade: course.grade === null ? "N/A" : course.grade,
@@ -844,6 +905,7 @@ export default function App() {
               AcademicYear: "",
               SemesterNumber: "",
               Season: "",
+              CourseCode: "",
               Course: "",
               Credits: "",
               Grade: "",
@@ -1059,6 +1121,13 @@ export default function App() {
       ...prev,
       [profileId]: updatedProfile ? getNextSemesterDraft(updatedProfile) : getNextSemesterDraft(currentProfile)
     }));
+
+    // Drop the user straight into the new semester so courses can be added right away.
+    setCollapsedSemesterById((prev) => ({ ...prev, [newSemester.id]: false }));
+    setCollapsedYearByNumber((prev) => ({ ...prev, [academicYear]: false }));
+    setCourseSearchQuery("");
+    setFocusSemesterId(newSemester.id);
+    return newSemester.id;
   }
 
   function beginEditSemester(semester: Semester) {
@@ -1286,8 +1355,17 @@ export default function App() {
 
   function handleAddCourse(profileId: string, semesterId: string) {
     const draft = courseDraftBySemester[semesterId] ?? EMPTY_COURSE_DRAFT;
+
+    const validationError = validateCourseDraft(draft);
+    if (validationError) {
+      setCourseFormErrorBySemester((prev) => ({ ...prev, [semesterId]: validationError }));
+      return;
+    }
+
     const parsed = parseCourseDraft(draft);
     if (!parsed) return;
+
+    setCourseFormErrorBySemester((prev) => ({ ...prev, [semesterId]: null }));
 
     setMutatingState((prev) => ({
       ...prev,
@@ -1343,25 +1421,46 @@ export default function App() {
   }
 
   function beginEditCourse(course: Course) {
-    setEditingCourseId(course.id);
-    setEditingCourseDraft({
+    const draft: CourseDraft = {
+      code: course.code,
       name: course.name,
       credits: String(course.credits),
       grade: course.grade === null ? "" : String(course.grade),
       isBinaryPass: course.isBinaryPass
-    });
+    };
+    editingCourseOriginalRef.current = draft;
+    setEditingCourseId(course.id);
+    setEditingCourseDraft(draft);
+    setCourseFormError(null);
   }
 
   function cancelEditCourse() {
+    const original = editingCourseOriginalRef.current;
+    const isDirty =
+      original !== null && JSON.stringify(original) !== JSON.stringify(editingCourseDraft);
+
+    // Only interrupt when there is actually something to lose.
+    if (isDirty && !window.confirm("Discard your unsaved changes to this course?")) return;
+
+    editingCourseOriginalRef.current = null;
     setEditingCourseId(null);
     setEditingCourseDraft({ ...EMPTY_COURSE_DRAFT });
+    setCourseFormError(null);
   }
 
   function saveEditCourse(profileId: string, semesterId: string) {
     if (!editingCourseId) return;
 
+    const validationError = validateCourseDraft(editingCourseDraft);
+    if (validationError) {
+      setCourseFormError(validationError);
+      return;
+    }
+
     const parsed = parseCourseDraft(editingCourseDraft);
     if (!parsed) return;
+
+    if (!window.confirm(`Save changes to "${parsed.name}"?`)) return;
 
     setMutatingState((prev) => ({
       ...prev,
@@ -1781,7 +1880,7 @@ export default function App() {
               {isSearching && (
                 <div className="search-summary">
                   {searchMatchCount === 0
-                    ? `No course names contain "${courseSearchQuery.trim()}".`
+                    ? `No course matches "${courseSearchQuery.trim()}".`
                     : `${searchMatchCount} course(s) in ${searchMatchesBySemester.size} semester(s).`}
                 </div>
               )}
@@ -2118,7 +2217,13 @@ export default function App() {
                               const semesterBodyId = `semester_body_${semester.id}`;
 
                               return (
-                                <article key={semester.id} className={`semester-card ${yearToneClass}`}>
+                                <article
+                                  key={semester.id}
+                                  className={`semester-card ${yearToneClass}`}
+                                  ref={(node) => {
+                                    semesterNodeRefs.current[semester.id] = node;
+                                  }}
+                                >
                                   <div className="semester-head">
                                     <button
                                       type="button"
@@ -2231,8 +2336,24 @@ export default function App() {
                             <h4>Add Course</h4>
                             <div className="row-fields compact">
                               <label>
+                                Code <span className="field-optional">(optional)</span>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. 104013"
+                                  value={courseDraft.code}
+                                  onChange={(event) => handleCourseDraftChange(semester.id, { code: event.target.value })}
+                                />
+                              </label>
+                              <label>
                                 Name
-                                <input type="text" value={courseDraft.name} onChange={(event) => handleCourseDraftChange(semester.id, { name: event.target.value })} />
+                                <input
+                                  type="text"
+                                  ref={(node) => {
+                                    courseNameInputRefs.current[semester.id] = node;
+                                  }}
+                                  value={courseDraft.name}
+                                  onChange={(event) => handleCourseDraftChange(semester.id, { name: event.target.value })}
+                                />
                               </label>
                               <label>
                                 Credits
@@ -2261,27 +2382,39 @@ export default function App() {
                                 <Icon name="plus" /> Add Course
                               </button>
                             </div>
+                            {courseFormErrorBySemester[semester.id] && (
+                              <div className="form-error">{courseFormErrorBySemester[semester.id]}</div>
+                            )}
                           </div>
 
                           <div className="courses-table-wrap">
                             <table>
                               <thead>
                                 <tr>
+                                  <th className="col-num">#</th>
+                                  <th>Code</th>
                                   <th>Course</th>
                                   <th>Credits</th>
                                   <th>Grade</th>
-                                  <th>Binary Pass</th>
+                                  <th>Binary</th>
                                   <th>Actions</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {semester.courses.map((course) => {
+                                {semester.courses.map((course, courseIndex) => {
                                   const isEditing = editingCourseId === course.id;
                                   const isHit = semesterMatches?.has(course.id) ?? false;
+                                  const rowClass = [isHit ? "row-hit" : "", isEditing ? "row-editing" : ""]
+                                    .filter(Boolean)
+                                    .join(" ");
                                   return (
-                                    <tr key={course.id} className={isHit ? "row-hit" : undefined}>
+                                    <tr key={course.id} className={rowClass || undefined}>
+                                      <td className="col-num">{courseIndex + 1}</td>
                                       {isEditing ? (
                                         <>
+                                          <td>
+                                            <input type="text" value={editingCourseDraft.code} onChange={(event) => setEditingCourseDraft((prev) => ({ ...prev, code: event.target.value }))} />
+                                          </td>
                                           <td>
                                             <input type="text" value={editingCourseDraft.name} onChange={(event) => setEditingCourseDraft((prev) => ({ ...prev, name: event.target.value }))} />
                                           </td>
@@ -2312,11 +2445,18 @@ export default function App() {
                                               <button type="button" className="neutral" onClick={cancelEditCourse}>
                                                 <Icon name="x" /> Cancel
                                               </button>
+                                              <button type="button" className="danger" onClick={() => handleDeleteCourse(activeProfile.id, semester.id, course.id)}>
+                                                <Icon name="trash" /> Delete
+                                              </button>
                                             </div>
+                                            {courseFormError && <div className="form-error">{courseFormError}</div>}
                                           </td>
                                         </>
                                       ) : (
                                         <>
+                                          <td className="course-code">
+                                            {course.code ? highlightMatch(course.code, normalizedSearchQuery) : "—"}
+                                          </td>
                                           <td>{highlightMatch(course.name, normalizedSearchQuery)}</td>
                                           <td>{course.credits.toFixed(1)}</td>
                                           <td>{course.grade === null ? "N/A" : course.grade}</td>
@@ -2325,9 +2465,6 @@ export default function App() {
                                             <div className="actions-inline">
                                               <button type="button" className="neutral" onClick={() => beginEditCourse(course)}>
                                                 <Icon name="pencil" /> Edit
-                                              </button>
-                                              <button type="button" className="danger" onClick={() => handleDeleteCourse(activeProfile.id, semester.id, course.id)}>
-                                                <Icon name="trash" /> Delete
                                               </button>
                                             </div>
                                           </td>
@@ -2338,7 +2475,7 @@ export default function App() {
                                 })}
                                 {semester.courses.length === 0 && (
                                   <tr>
-                                    <td colSpan={5} className="muted center">
+                                    <td colSpan={7} className="muted center">
                                       No courses in this semester yet.
                                     </td>
                                   </tr>
@@ -2360,7 +2497,7 @@ export default function App() {
                 })}
                 {sortedActiveSemesters.length === 0 && <div className="empty">No semesters yet. Add the first one above.</div>}
                 {isSearching && searchMatchCount === 0 && sortedActiveSemesters.length > 0 && (
-                  <div className="empty">No course names contain "{courseSearchQuery.trim()}".</div>
+                  <div className="empty">No course name or code contains "{courseSearchQuery.trim()}".</div>
                 )}
               </section>
             </>
