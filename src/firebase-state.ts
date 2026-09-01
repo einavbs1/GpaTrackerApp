@@ -1,6 +1,15 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
-import { createId, type AppState, type Course, type Profile, type SemesterSeason, SEASONS } from "./types";
+import {
+  createEmptyAccount,
+  createId,
+  type Account,
+  type AppState,
+  type Course,
+  type Profile,
+  type SemesterSeason,
+  SEASONS
+} from "./types";
 
 export function buildDefaultState(): AppState {
   const profile: Profile = {
@@ -13,8 +22,34 @@ export function buildDefaultState(): AppState {
   return {
     lastModified: Date.now(),
     theme: "light",
+    account: createEmptyAccount(),
     profiles: [profile],
     activeProfileId: profile.id
+  };
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === "string" ? value.slice(0, 120) : "";
+}
+
+function normalizePositiveNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function normalizeAccount(input: unknown): Account {
+  if (!input || typeof input !== "object") {
+    return createEmptyAccount();
+  }
+
+  const source = input as Partial<Account>;
+  return {
+    fullName: normalizeText(source.fullName),
+    institution: normalizeText(source.institution),
+    degreeProgram: normalizeText(source.degreeProgram),
+    studentId: normalizeText(source.studentId),
+    expectedGraduationYear: normalizePositiveNumber(source.expectedGraduationYear),
+    targetGpa: normalizePositiveNumber(source.targetGpa),
+    requiredCredits: normalizePositiveNumber(source.requiredCredits)
   };
 }
 
@@ -76,6 +111,7 @@ export function normalizeState(input: unknown): AppState {
   return {
     lastModified: typeof source.lastModified === "number" ? source.lastModified : Date.now(),
     theme: source.theme === "dark" || source.theme === "light" ? source.theme : "light",
+    account: normalizeAccount(source.account),
     profiles: profiles.length > 0 ? profiles : buildDefaultState().profiles,
     activeProfileId
   };
@@ -92,6 +128,10 @@ export function isValidImportedState(input: unknown): input is AppState {
   }
 
   if (state.theme !== undefined && state.theme !== "dark" && state.theme !== "light") {
+    return false;
+  }
+
+  if (state.account !== undefined && (state.account === null || typeof state.account !== "object")) {
     return false;
   }
 

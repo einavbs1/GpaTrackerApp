@@ -24,11 +24,34 @@ export interface Profile {
   semesters: Semester[];
 }
 
+export interface Account {
+  fullName: string;
+  institution: string;
+  degreeProgram: string;
+  studentId: string;
+  expectedGraduationYear: number | null;
+  targetGpa: number | null;
+  requiredCredits: number | null;
+}
+
 export interface AppState {
   lastModified: number;
   theme: "dark" | "light";
+  account: Account;
   profiles: Profile[];
   activeProfileId: string | null;
+}
+
+export function createEmptyAccount(): Account {
+  return {
+    fullName: "",
+    institution: "",
+    degreeProgram: "",
+    studentId: "",
+    expectedGraduationYear: null,
+    targetGpa: null,
+    requiredCredits: null
+  };
 }
 
 export const SEASONS: SemesterSeason[] = ["Winter A", "Spring B", "Summer"];
@@ -44,6 +67,7 @@ export function createEmptyState(): AppState {
   return {
     lastModified: Date.now(),
     theme: "light",
+    account: createEmptyAccount(),
     profiles: [defaultProfile],
     activeProfileId: defaultProfile.id
   };

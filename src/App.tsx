@@ -2,16 +2,21 @@ import { ChangeEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, u
 import * as XLSX from "xlsx";
 import {
   AuthCredential,
+  EmailAuthProvider,
   GoogleAuthProvider,
   User,
   createUserWithEmailAndPassword,
   fetchSignInMethodsForEmail,
   linkWithCredential,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signOut
+  signOut,
+  updatePassword,
+  updateProfile,
+  verifyBeforeUpdateEmail
 } from "firebase/auth";
 import {
   aggregateCourses,
@@ -31,7 +36,64 @@ import {
   normalizeState,
   saveUserAppState
 } from "./firebase-state";
-import { SEASONS, createId, type AppState, type Course, type Profile, type Semester, type SemesterSeason } from "./types";
+import { SEASONS, createId, type Account, type AppState, type Course, type Profile, type Semester, type SemesterSeason } from "./types";
+
+type AccountDraft = {
+  displayName: string;
+  email: string;
+  fullName: string;
+  institution: string;
+  degreeProgram: string;
+  studentId: string;
+  expectedGraduationYear: string;
+  targetGpa: string;
+  requiredCredits: string;
+};
+
+type PasswordDraft = {
+  current: string;
+  next: string;
+  confirm: string;
+};
+
+const EMPTY_PASSWORD_DRAFT: PasswordDraft = { current: "", next: "", confirm: "" };
+
+const MIN_PASSWORD_LENGTH = 8;
+
+function parseOptionalNumber(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function numberToDraft(value: number | null): string {
+  return value === null ? "" : String(value);
+}
+
+function describeAuthError(error: unknown): string {
+  const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
+
+  switch (code) {
+    case "auth/wrong-password":
+    case "auth/invalid-credential":
+      return "Current password is incorrect.";
+    case "auth/weak-password":
+      return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
+    case "auth/requires-recent-login":
+      return "For security, sign out and sign back in before making this change.";
+    case "auth/email-already-in-use":
+      return "That email is already used by another account.";
+    case "auth/invalid-email":
+      return "That email address is not valid.";
+    case "auth/too-many-requests":
+      return "Too many attempts. Try again later.";
+    default:
+      return error instanceof Error ? error.message : "Something went wrong. Try again.";
+  }
+}
+
 
 type CourseDraft = {
   code: string;
@@ -235,6 +297,12 @@ export default function App() {
   const [courseSearchQuery, setCourseSearchQuery] = useState("");
   const [isDataMenuOpen, setIsDataMenuOpen] = useState(false);
   const [isAddSemesterOpen, setIsAddSemesterOpen] = useState(false);
+  const [isAccountOpen, setIsAccountOpen] = useState(false);
+  const [accountDraft, setAccountDraft] = useState<AccountDraft | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState<PasswordDraft>(EMPTY_PASSWORD_DRAFT);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingProfileName, setEditingProfileName] = useState("");
   const [editingSemesterId, setEditingSemesterId] = useState<string | null>(null);
@@ -306,6 +374,17 @@ export default function App() {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isAddSemesterOpen]);
+
+  useEffect(() => {
+    if (!isAccountOpen) return;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsAccountOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isAccountOpen]);
 
   useEffect(() => {
     if (simulatorMode !== "open") return;
@@ -870,6 +949,152 @@ export default function App() {
       await signOut(auth);
     } catch (_error) {
       setAuthError("Sign out failed.");
+    }
+  }
+
+  function openAccount() {
+    if (!user) return;
+
+    const account = state.account;
+    setAccountDraft({
+      displayName: user.displayName ?? "",
+      email: user.email ?? "",
+      fullName: account.fullName,
+      institution: account.institution,
+      degreeProgram: account.degreeProgram,
+      studentId: account.studentId,
+      expectedGraduationYear: numberToDraft(account.expectedGraduationYear),
+      targetGpa: numberToDraft(account.targetGpa),
+      requiredCredits: numberToDraft(account.requiredCredits)
+    });
+    setPasswordDraft(EMPTY_PASSWORD_DRAFT);
+    setAccountError(null);
+    setAccountSuccess(null);
+    setIsAccountOpen(true);
+  }
+
+  function closeAccount() {
+    setIsAccountOpen(false);
+    setAccountDraft(null);
+    setPasswordDraft(EMPTY_PASSWORD_DRAFT);
+    setAccountError(null);
+    setAccountSuccess(null);
+  }
+
+  function patchAccountDraft(patch: Partial<AccountDraft>) {
+    setAccountDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  async function handleSaveAccount() {
+    if (!user || !accountDraft) return;
+
+    setAccountBusy(true);
+    setAccountError(null);
+    setAccountSuccess(null);
+
+    const nextAccount: Account = {
+      fullName: accountDraft.fullName.trim(),
+      institution: accountDraft.institution.trim(),
+      degreeProgram: accountDraft.degreeProgram.trim(),
+      studentId: accountDraft.studentId.trim(),
+      expectedGraduationYear: parseOptionalNumber(accountDraft.expectedGraduationYear),
+      targetGpa: parseOptionalNumber(accountDraft.targetGpa),
+      requiredCredits: parseOptionalNumber(accountDraft.requiredCredits)
+    };
+
+    const nextDisplayName = accountDraft.displayName.trim();
+
+    try {
+      if (nextDisplayName !== (user.displayName ?? "")) {
+        await updateProfile(user, { displayName: nextDisplayName || null });
+        // Firebase mutates the same User object, so React needs a fresh reference to re-render.
+        setUser(Object.assign(Object.create(Object.getPrototypeOf(user)), user));
+      }
+
+      setMutatingState((prev) => ({ ...prev, account: nextAccount }));
+      setAccountSuccess("Profile details saved.");
+    } catch (error) {
+      setAccountError(describeAuthError(error));
+    } finally {
+      setAccountBusy(false);
+    }
+  }
+
+  async function handleChangePassword() {
+    if (!user || !accountDraft) return;
+
+    const currentEmail = user.email;
+    if (!currentEmail) {
+      setAccountError("This account has no email address, so the password cannot be changed here.");
+      return;
+    }
+
+    if (passwordDraft.next.length < MIN_PASSWORD_LENGTH) {
+      setAccountError(`New password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+
+    if (passwordDraft.next !== passwordDraft.confirm) {
+      setAccountError("New password and confirmation do not match.");
+      return;
+    }
+
+    if (passwordDraft.next === passwordDraft.current) {
+      setAccountError("New password must be different from the current one.");
+      return;
+    }
+
+    setAccountBusy(true);
+    setAccountError(null);
+    setAccountSuccess(null);
+
+    try {
+      const credential = EmailAuthProvider.credential(currentEmail, passwordDraft.current);
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, passwordDraft.next);
+      setPasswordDraft(EMPTY_PASSWORD_DRAFT);
+      setAccountSuccess("Password updated.");
+    } catch (error) {
+      setAccountError(describeAuthError(error));
+    } finally {
+      setAccountBusy(false);
+    }
+  }
+
+  async function handleChangeEmail() {
+    if (!user || !accountDraft) return;
+
+    const currentEmail = user.email;
+    const nextEmail = accountDraft.email.trim();
+
+    if (!currentEmail) {
+      setAccountError("This account has no email address to change.");
+      return;
+    }
+
+    if (!nextEmail || nextEmail === currentEmail) {
+      setAccountError("Enter a different email address first.");
+      return;
+    }
+
+    if (!passwordDraft.current) {
+      setAccountError("Enter your current password to confirm the email change.");
+      return;
+    }
+
+    setAccountBusy(true);
+    setAccountError(null);
+    setAccountSuccess(null);
+
+    try {
+      const credential = EmailAuthProvider.credential(currentEmail, passwordDraft.current);
+      await reauthenticateWithCredential(user, credential);
+      await verifyBeforeUpdateEmail(user, nextEmail);
+      setAccountSuccess(`Verification link sent to ${nextEmail}. The address changes once you confirm it.`);
+    } catch (error) {
+      setAccountError(describeAuthError(error));
+    } finally {
+      setAccountBusy(false);
     }
   }
 
@@ -1720,8 +1945,9 @@ export default function App() {
     );
   }
 
-  const userLabel = user.displayName ?? user.email ?? user.uid;
+  const userLabel = state.account.fullName.trim() || user.displayName || user.email || user.uid;
   const userInitial = userLabel.trim().charAt(0).toUpperCase() || "?";
+  const hasPasswordProvider = user.providerData.some((provider) => provider.providerId === "password");
 
   return (
     <div className="app-shell">
@@ -1731,10 +1957,10 @@ export default function App() {
           <h1>Degree GPA Calculator</h1>
         </div>
         <div className="topbar-actions">
-          <span className="user-chip" title={userLabel}>
+          <button type="button" className="user-chip" title="Account settings" aria-label="Account settings" onClick={openAccount}>
             <span className="user-chip-avatar" aria-hidden="true">{userInitial}</span>
             <span className="user-chip-name">{userLabel}</span>
-          </span>
+          </button>
 
           <button
             type="button"
@@ -2647,6 +2873,205 @@ export default function App() {
                 }}
               >
                 <Icon name="plus" /> Add Semester
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAccountOpen && accountDraft && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeAccount();
+          }}
+        >
+          <div className="modal-dialog modal-wide account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title">
+            <div className="account-header">
+              <span className="account-avatar" aria-hidden="true">{userInitial}</span>
+              <div>
+                <h3 id="account-title">Account &amp; Profile</h3>
+                <span className="modal-subtitle">
+                  {hasPasswordProvider ? "Email & password account" : "Signed in with Google"}
+                </span>
+              </div>
+            </div>
+
+            {accountError && <div className="banner error">{accountError}</div>}
+            {accountSuccess && <div className="banner success">{accountSuccess}</div>}
+
+            <section className="account-section">
+              <h4>Personal details</h4>
+              <div className="account-grid">
+                <label>
+                  Display name
+                  <input
+                    type="text"
+                    autoComplete="nickname"
+                    value={accountDraft.displayName}
+                    onChange={(event) => patchAccountDraft({ displayName: event.target.value })}
+                    placeholder="Shown across the app"
+                  />
+                </label>
+                <label>
+                  Full legal name
+                  <input
+                    type="text"
+                    autoComplete="name"
+                    value={accountDraft.fullName}
+                    onChange={(event) => patchAccountDraft({ fullName: event.target.value })}
+                    placeholder="As it appears on transcripts"
+                  />
+                </label>
+                <label>
+                  Institution
+                  <input
+                    type="text"
+                    autoComplete="organization"
+                    value={accountDraft.institution}
+                    onChange={(event) => patchAccountDraft({ institution: event.target.value })}
+                    placeholder="University or college"
+                  />
+                </label>
+                <label>
+                  Degree / programme
+                  <input
+                    type="text"
+                    value={accountDraft.degreeProgram}
+                    onChange={(event) => patchAccountDraft({ degreeProgram: event.target.value })}
+                    placeholder="e.g. BSc Computer Science"
+                  />
+                </label>
+                <label>
+                  Student ID <span className="field-optional">optional</span>
+                  <input
+                    type="text"
+                    value={accountDraft.studentId}
+                    onChange={(event) => patchAccountDraft({ studentId: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Expected graduation year <span className="field-optional">optional</span>
+                  <input
+                    type="number"
+                    min={1900}
+                    max={2200}
+                    step={1}
+                    value={accountDraft.expectedGraduationYear}
+                    onChange={(event) => patchAccountDraft({ expectedGraduationYear: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Target GPA <span className="field-optional">optional</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    value={accountDraft.targetGpa}
+                    onChange={(event) => patchAccountDraft({ targetGpa: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Credits required for degree <span className="field-optional">optional</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={accountDraft.requiredCredits}
+                    onChange={(event) => patchAccountDraft({ requiredCredits: event.target.value })}
+                  />
+                </label>
+              </div>
+              <div className="modal-actions">
+                <button type="button" disabled={accountBusy} onClick={handleSaveAccount}>
+                  <Icon name="check" /> Save details
+                </button>
+              </div>
+            </section>
+
+            {hasPasswordProvider ? (
+              <>
+                <section className="account-section">
+                  <h4>Email address</h4>
+                  <div className="account-grid">
+                    <label>
+                      Email
+                      <input
+                        type="email"
+                        autoComplete="email"
+                        value={accountDraft.email}
+                        onChange={(event) => patchAccountDraft({ email: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                  <p className="account-hint">
+                    Changing this sends a verification link to the new address. The change applies only after you confirm it.
+                    Your current password is required below.
+                  </p>
+                  <div className="modal-actions">
+                    <button type="button" className="neutral" disabled={accountBusy} onClick={handleChangeEmail}>
+                      <Icon name="mail" /> Send verification
+                    </button>
+                  </div>
+                </section>
+
+                <section className="account-section">
+                  <h4>Password</h4>
+                  <div className="account-grid">
+                    <label>
+                      Current password
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        value={passwordDraft.current}
+                        onChange={(event) => setPasswordDraft((prev) => ({ ...prev, current: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      New password
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={passwordDraft.next}
+                        onChange={(event) => setPasswordDraft((prev) => ({ ...prev, next: event.target.value }))}
+                      />
+                    </label>
+                    <label>
+                      Confirm new password
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={passwordDraft.confirm}
+                        onChange={(event) => setPasswordDraft((prev) => ({ ...prev, confirm: event.target.value }))}
+                      />
+                    </label>
+                  </div>
+                  <p className="account-hint">At least {MIN_PASSWORD_LENGTH} characters.</p>
+                  <div className="modal-actions">
+                    <button
+                      type="button"
+                      className="neutral"
+                      disabled={accountBusy || !passwordDraft.current || !passwordDraft.next}
+                      onClick={handleChangePassword}
+                    >
+                      <Icon name="check" /> Update password
+                    </button>
+                  </div>
+                </section>
+              </>
+            ) : (
+              <section className="account-section">
+                <h4>Sign-in method</h4>
+                <p className="account-hint">
+                  This account signs in with Google ({user.email}). Email and password are managed in your Google account.
+                </p>
+              </section>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="neutral" onClick={closeAccount}>
+                <Icon name="x" /> Close
               </button>
             </div>
           </div>
