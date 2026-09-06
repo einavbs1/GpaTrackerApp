@@ -1,7 +1,9 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
 
@@ -19,7 +21,12 @@ const commit = git("git rev-parse --short HEAD") || "unknown";
 const buildRef = git("git status --porcelain") ? `${commit}+dirty` : commit;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url))
+    }
+  },
   define: {
     __BUILD_DATE__: JSON.stringify(new Date().toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })),
     __APP_VERSION__: JSON.stringify(pkg.version),

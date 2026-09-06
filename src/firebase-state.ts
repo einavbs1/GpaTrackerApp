@@ -1,6 +1,8 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "./firebase";
+import { normalizeAppearance } from "./lib/theme";
 import {
+  createDefaultAppearance,
   createEmptyAccount,
   createId,
   type Account,
@@ -21,7 +23,8 @@ export function buildDefaultState(): AppState {
 
   return {
     lastModified: Date.now(),
-    theme: "light",
+    theme: "dark",
+    appearance: createDefaultAppearance(),
     account: createEmptyAccount(),
     profiles: [profile],
     activeProfileId: profile.id
@@ -110,7 +113,11 @@ export function normalizeState(input: unknown): AppState {
 
   return {
     lastModified: typeof source.lastModified === "number" ? source.lastModified : Date.now(),
-    theme: source.theme === "dark" || source.theme === "light" ? source.theme : "light",
+    theme: source.theme === "dark" || source.theme === "light" ? source.theme : "dark",
+    // Documents written before the redesign carry only `theme`; seed the mode from it.
+    appearance: normalizeAppearance(
+      source.appearance ?? { ...createDefaultAppearance(), mode: source.theme === "light" ? "light" : "dark" }
+    ),
     account: normalizeAccount(source.account),
     profiles: profiles.length > 0 ? profiles : buildDefaultState().profiles,
     activeProfileId

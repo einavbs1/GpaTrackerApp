@@ -37,9 +37,22 @@ export interface Account {
 export interface AppState {
   lastModified: number;
   theme: "dark" | "light";
+  appearance: Appearance;
   account: Account;
   profiles: Profile[];
   activeProfileId: string | null;
+}
+
+export type ThemeMode = "dark" | "light" | "system";
+
+export interface Appearance {
+  mode: ThemeMode;
+  primaryId: string;
+  surfaceId: string;
+}
+
+export function createDefaultAppearance(): Appearance {
+  return { mode: "dark", primaryId: "gold", surfaceId: "slate" };
 }
 
 export function createEmptyAccount(): Account {
@@ -66,7 +79,8 @@ export function createEmptyState(): AppState {
 
   return {
     lastModified: Date.now(),
-    theme: "light",
+    theme: "dark",
+    appearance: createDefaultAppearance(),
     account: createEmptyAccount(),
     profiles: [defaultProfile],
     activeProfileId: defaultProfile.id
