@@ -1,16 +1,14 @@
-import { ChevronsDownUp, ChevronsUpDown, Plus, Search, X } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, Plus, Search, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge, Card, EmptyState, GpaPill, SectionHeading } from "@/components/ui/surface";
 import { Chevron, Collapse } from "@/components/ui/collapse";
 import { SemesterCard, TONE_BG, TONE_BORDER } from "@/components/semesters/SemesterCard";
-import { SimulatorSection } from "@/components/simulator/SimulatorSection";
 import { cn } from "@/lib/utils";
 import { formatNumber, yearTone } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { formatGpa } from "@/calculations";
 import type { useSemesterBrowser } from "@/hooks/useSemesterBrowser";
-import type { useSimulator } from "@/hooks/useSimulator";
 import type { CourseDraft, SemesterDraft } from "@/lib/drafts";
 import type { Course, Profile, Semester } from "@/types";
 
@@ -21,11 +19,7 @@ interface DashboardScreenProps {
   annualGpas: Record<number, number | null>;
   browser: ReturnType<typeof useSemesterBrowser>;
   onOpenAddSemester: () => void;
-  simulator: ReturnType<typeof useSimulator>;
-  simulatorOpen: boolean;
-  onSimulatorOpenChange: (open: boolean) => void;
-  onBinaryCreditCapChange: (value: string) => void;
-  onApplyBinary: () => void;
+  onOpenSimulator: () => void;
   editingSemesterId: string | null;
   editingSemesterDraft: SemesterDraft;
   onEditingSemesterDraftChange: (patch: Partial<SemesterDraft>) => void;
@@ -142,15 +136,20 @@ export function DashboardScreen(props: DashboardScreenProps) {
             )}
           </section>
 
-          <SimulatorSection
-            open={props.simulatorOpen}
-            onOpenChange={props.onSimulatorOpenChange}
-            simulator={props.simulator}
-            overallGpa={overallGpa}
-            sortedSemesters={browser.sortedSemesters}
-            onCreditCapChange={props.onBinaryCreditCapChange}
-            onApply={props.onApplyBinary}
-          />
+          <Card className="flex flex-col gap-4 p-6">
+            <SectionHeading
+              title={
+                <span className="flex items-center gap-2">
+                  <Sparkles className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                  {t.simulator.title}
+                </span>
+              }
+              hint={t.simulator.description}
+            />
+            <Button variant="soft" className="self-start" onClick={props.onOpenSimulator}>
+              {t.simulator.open}
+            </Button>
+          </Card>
         </>
       )}
 

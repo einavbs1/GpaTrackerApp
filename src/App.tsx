@@ -71,6 +71,7 @@ import { ProfilesPanel } from "@/components/profiles/ProfilesPanel";
 import { DashboardScreen } from "@/components/dashboard/DashboardScreen";
 import { AddCourseSheet, AddSemesterSheet } from "@/components/dialogs/AddSheets";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
+import { SimulatorScreen } from "@/components/simulator/SimulatorScreen";
 import { Banner } from "@/components/ui/surface";
 
 const REMEMBERED_EMAIL_KEY = "gpa_tracker_remembered_email";
@@ -84,7 +85,7 @@ export default function App() {
   const [dataLoading, setDataLoading] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
   const [state, setState] = useState<AppState>(buildDefaultState());
-  const [view, setView] = useState<"dashboard" | "settings">("dashboard");
+  const [view, setView] = useState<"dashboard" | "settings" | "simulator">("dashboard");
 
   const [email, setEmail] = useState(() => localStorage.getItem(REMEMBERED_EMAIL_KEY) ?? "");
   const [password, setPassword] = useState("");
@@ -109,8 +110,6 @@ export default function App() {
   const [accountBusy, setAccountBusy] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
-
-  const [simulatorOpen, setSimulatorOpen] = useState(false);
 
   const [authError, setAuthError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -229,7 +228,7 @@ export default function App() {
     return () => cancelAnimationFrame(frame);
   }, [focusSemesterId]);
 
-  function goTo(nextView: "dashboard" | "settings") {
+  function goTo(nextView: "dashboard" | "settings" | "simulator") {
     startViewTransition(() => setView(nextView));
   }
 
@@ -940,6 +939,8 @@ export default function App() {
     }));
 
     simulator.clearSelection();
+    // The point of applying is to see the new overall GPA, which lives on the dashboard.
+    goTo("dashboard");
   }
 
   if (authLoading) {
@@ -1009,6 +1010,19 @@ export default function App() {
     );
   }
 
+  if (view === "simulator" && activeProfile) {
+    return (
+      <SimulatorScreen
+        simulator={simulator}
+        overallGpa={overallGpa}
+        sortedSemesters={browser.sortedSemesters}
+        onCreditCapChange={handleBinaryCreditCapChange}
+        onApply={applySelectedAsBinary}
+        onBack={() => goTo("dashboard")}
+      />
+    );
+  }
+
   const addCourseSemester = activeProfile?.semesters.find((item) => item.id === addCourseSemesterId);
 
   return (
@@ -1058,11 +1072,7 @@ export default function App() {
             annualGpas={annualGpas}
             browser={browser}
             onOpenAddSemester={() => setIsAddSemesterOpen(true)}
-            simulator={simulator}
-            simulatorOpen={simulatorOpen}
-            onSimulatorOpenChange={setSimulatorOpen}
-            onBinaryCreditCapChange={handleBinaryCreditCapChange}
-            onApplyBinary={applySelectedAsBinary}
+            onOpenSimulator={() => goTo("simulator")}
             editingSemesterId={editingSemesterId}
             editingSemesterDraft={editingSemesterDraft}
             onEditingSemesterDraftChange={(patch) => setEditingSemesterDraft((prev) => ({ ...prev, ...patch }))}

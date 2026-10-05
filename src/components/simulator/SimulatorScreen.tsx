@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Check, ChevronsUpDown, Eraser, Sparkles, X } from "lucide-react";
+import { ArrowRight, Check, ChevronsUpDown, Eraser, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Checkbox, CheckboxField } from "@/components/ui/toggle";
-import { Badge, Banner, Card } from "@/components/ui/surface";
+import { Badge, Banner } from "@/components/ui/surface";
 import { Chevron, Collapse } from "@/components/ui/collapse";
 import { TONE_BG, TONE_BORDER } from "@/components/semesters/SemesterCard";
 import { cn } from "@/lib/utils";
@@ -235,42 +235,32 @@ function SimulatorBody({ simulator, overallGpa, sortedSemesters, onCreditCapChan
   );
 }
 
-interface SimulatorSectionProps extends SimulatorBodyProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+interface SimulatorScreenProps extends SimulatorBodyProps {
+  onBack: () => void;
 }
 
-export function SimulatorSection({ open, onOpenChange, ...bodyProps }: SimulatorSectionProps) {
-  const bodyId = "simulator_body";
-
+export function SimulatorScreen({ onBack, ...bodyProps }: SimulatorScreenProps) {
   return (
-    <Card className="overflow-hidden">
-      <h3>
-        <button
-          type="button"
-          onClick={() => onOpenChange(!open)}
-          aria-expanded={open}
-          aria-controls={bodyId}
-          className="press flex w-full items-start gap-3 px-5 py-5 text-start sm:px-6"
-        >
-          <Chevron open={open} className="mt-1.5" />
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2 text-lg text-ink-strong">
-              <Sparkles className="size-4 shrink-0 text-primary" aria-hidden="true" />
-              {t.simulator.title}
-            </span>
-            <span className="mt-1 block max-w-prose text-sm leading-relaxed text-ink-muted">
-              {t.simulator.description}
-            </span>
+    <div className="pt-safe pb-safe px-safe flex min-h-dvh flex-col">
+      <div className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:px-6 sm:py-10">
+        <header className="animate-enter flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={onBack} aria-label={t.nav.back}>
+            {/* Points back toward the dashboard; RTL flips the visual direction. */}
+            <ArrowRight className="rtl:rotate-0 ltr:rotate-180" />
+          </Button>
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
+            <Sparkles className="size-5" />
           </span>
-        </button>
-      </h3>
+          <div className="min-w-0">
+            <h1 className="truncate text-xl text-ink-strong">{t.simulator.title}</h1>
+            <p className="text-xs leading-relaxed text-ink-faint">{t.simulator.description}</p>
+          </div>
+        </header>
 
-      <Collapse open={open} id={bodyId}>
-        <div className="border-t border-line p-4 sm:p-6">
+        <div className="mt-6">
           <SimulatorBody {...bodyProps} />
         </div>
-      </Collapse>
-    </Card>
+      </div>
+    </div>
   );
 }

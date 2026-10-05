@@ -141,6 +141,7 @@ export const t = {
   simulator: {
     title: "סימולטור מעבר בינארי",
     description: "בדוק מה יקרה לממוצע הכללי אם קורס יעבור למתכונת עובר/נכשל.",
+    open: "פתיחת הסימולטור",
     currentGpa: "ממוצע נוכחי",
     simulatedGpa: "ממוצע מדומה",
     nothingSelected: "עדיין לא נבחר כלום",
