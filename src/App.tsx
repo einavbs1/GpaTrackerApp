@@ -69,7 +69,6 @@ import { StatusScreen, VersionFooter } from "@/components/layout/StatusScreen";
 import { TopBar } from "@/components/layout/TopBar";
 import { ProfilesPanel } from "@/components/profiles/ProfilesPanel";
 import { DashboardScreen } from "@/components/dashboard/DashboardScreen";
-import { SimulatorPanel } from "@/components/simulator/SimulatorPanel";
 import { AddCourseSheet, AddSemesterSheet } from "@/components/dialogs/AddSheets";
 import { SettingsScreen } from "@/components/settings/SettingsScreen";
 import { Banner } from "@/components/ui/surface";
@@ -111,7 +110,7 @@ export default function App() {
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
 
-  const [simulatorMode, setSimulatorMode] = useState<"closed" | "open" | "tab">("closed");
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
 
   const [authError, setAuthError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1059,7 +1058,11 @@ export default function App() {
             annualGpas={annualGpas}
             browser={browser}
             onOpenAddSemester={() => setIsAddSemesterOpen(true)}
-            onOpenSimulator={() => setSimulatorMode("open")}
+            simulator={simulator}
+            simulatorOpen={simulatorOpen}
+            onSimulatorOpenChange={setSimulatorOpen}
+            onBinaryCreditCapChange={handleBinaryCreditCapChange}
+            onApplyBinary={applySelectedAsBinary}
             editingSemesterId={editingSemesterId}
             editingSemesterDraft={editingSemesterDraft}
             onEditingSemesterDraftChange={(patch) => setEditingSemesterDraft((prev) => ({ ...prev, ...patch }))}
@@ -1110,16 +1113,6 @@ export default function App() {
             nameInputRef={(node) => {
               if (addCourseSemesterId) courseNameInputRefs.current[addCourseSemesterId] = node;
             }}
-          />
-
-          <SimulatorPanel
-            mode={simulatorMode}
-            onModeChange={setSimulatorMode}
-            simulator={simulator}
-            overallGpa={overallGpa}
-            sortedSemesters={browser.sortedSemesters}
-            onCreditCapChange={handleBinaryCreditCapChange}
-            onApply={applySelectedAsBinary}
           />
         </>
       )}

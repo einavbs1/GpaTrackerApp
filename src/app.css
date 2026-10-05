@@ -110,6 +110,13 @@
   --color-tone-4: var(--app-tone-4);
   --color-tone-5: var(--app-tone-5);
   --color-tone-6: var(--app-tone-6);
+
+  --color-tone-1-line: var(--app-tone-1-line);
+  --color-tone-2-line: var(--app-tone-2-line);
+  --color-tone-3-line: var(--app-tone-3-line);
+  --color-tone-4-line: var(--app-tone-4-line);
+  --color-tone-5-line: var(--app-tone-5-line);
+  --color-tone-6-line: var(--app-tone-6-line);
 }
 
 @layer base {
@@ -151,6 +158,13 @@
     --app-tone-4: oklch(0.72 0.1 215 / 0.14);
     --app-tone-5: oklch(0.7 0.11 275 / 0.14);
     --app-tone-6: oklch(0.72 0.11 330 / 0.14);
+
+    --app-tone-1-line: oklch(0.72 0.11 20 / 0.28);
+    --app-tone-2-line: oklch(0.75 0.11 85 / 0.28);
+    --app-tone-3-line: oklch(0.75 0.11 150 / 0.28);
+    --app-tone-4-line: oklch(0.72 0.1 215 / 0.28);
+    --app-tone-5-line: oklch(0.7 0.11 275 / 0.28);
+    --app-tone-6-line: oklch(0.72 0.11 330 / 0.28);
   }
 
   [data-theme="light"] {
@@ -177,12 +191,20 @@
     --app-critical: oklch(0.55 0.19 25);
     --app-info: oklch(0.55 0.11 240);
 
-    --app-tone-1: oklch(0.72 0.13 20 / 0.1);
-    --app-tone-2: oklch(0.75 0.13 85 / 0.1);
-    --app-tone-3: oklch(0.7 0.13 150 / 0.1);
-    --app-tone-4: oklch(0.68 0.12 215 / 0.1);
-    --app-tone-5: oklch(0.65 0.13 275 / 0.1);
-    --app-tone-6: oklch(0.68 0.13 330 / 0.1);
+    /* A white page swallows a 10% wash, so light mode needs a deeper tint than dark. */
+    --app-tone-1: oklch(0.72 0.15 20 / 0.17);
+    --app-tone-2: oklch(0.75 0.15 85 / 0.17);
+    --app-tone-3: oklch(0.7 0.15 150 / 0.17);
+    --app-tone-4: oklch(0.68 0.14 215 / 0.17);
+    --app-tone-5: oklch(0.65 0.15 275 / 0.17);
+    --app-tone-6: oklch(0.68 0.15 330 / 0.17);
+
+    --app-tone-1-line: oklch(0.6 0.14 20 / 0.4);
+    --app-tone-2-line: oklch(0.62 0.14 85 / 0.4);
+    --app-tone-3-line: oklch(0.58 0.14 150 / 0.4);
+    --app-tone-4-line: oklch(0.57 0.13 215 / 0.4);
+    --app-tone-5-line: oklch(0.55 0.14 275 / 0.4);
+    --app-tone-6-line: oklch(0.57 0.14 330 / 0.4);
   }
 
   /* Gold on a light page needs a darker ink than the raw swatch to stay legible. */

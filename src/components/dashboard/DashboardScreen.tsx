@@ -1,14 +1,16 @@
-import { ChevronsDownUp, ChevronsUpDown, Plus, Search, Sparkles, X } from "lucide-react";
+import { ChevronsDownUp, ChevronsUpDown, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge, Card, EmptyState, GpaPill, SectionHeading } from "@/components/ui/surface";
 import { Chevron, Collapse } from "@/components/ui/collapse";
-import { SemesterCard, TONE_BG } from "@/components/semesters/SemesterCard";
+import { SemesterCard, TONE_BG, TONE_BORDER } from "@/components/semesters/SemesterCard";
+import { SimulatorSection } from "@/components/simulator/SimulatorSection";
 import { cn } from "@/lib/utils";
 import { formatNumber, yearTone } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { formatGpa } from "@/calculations";
 import type { useSemesterBrowser } from "@/hooks/useSemesterBrowser";
+import type { useSimulator } from "@/hooks/useSimulator";
 import type { CourseDraft, SemesterDraft } from "@/lib/drafts";
 import type { Course, Profile, Semester } from "@/types";
 
@@ -19,7 +21,11 @@ interface DashboardScreenProps {
   annualGpas: Record<number, number | null>;
   browser: ReturnType<typeof useSemesterBrowser>;
   onOpenAddSemester: () => void;
-  onOpenSimulator: () => void;
+  simulator: ReturnType<typeof useSimulator>;
+  simulatorOpen: boolean;
+  onSimulatorOpenChange: (open: boolean) => void;
+  onBinaryCreditCapChange: (value: string) => void;
+  onApplyBinary: () => void;
   editingSemesterId: string | null;
   editingSemesterDraft: SemesterDraft;
   onEditingSemesterDraftChange: (patch: Partial<SemesterDraft>) => void;
@@ -120,7 +126,8 @@ export function DashboardScreen(props: DashboardScreenProps) {
                   <div
                     key={year}
                     className={cn(
-                      "stagger flex items-center gap-3 rounded-2xl border border-line px-4 py-3",
+                      "stagger flex items-center gap-3 rounded-2xl border px-4 py-3",
+                      TONE_BORDER[yearTone(year)],
                       TONE_BG[yearTone(year)]
                     )}
                     style={{ "--index": index } as React.CSSProperties}
@@ -135,12 +142,15 @@ export function DashboardScreen(props: DashboardScreenProps) {
             )}
           </section>
 
-          <Card className="flex flex-col gap-4 p-6">
-            <SectionHeading title={t.simulator.title} hint={t.simulator.description} />
-            <Button variant="soft" className="self-start" onClick={props.onOpenSimulator}>
-              <Sparkles /> {t.simulator.open}
-            </Button>
-          </Card>
+          <SimulatorSection
+            open={props.simulatorOpen}
+            onOpenChange={props.onSimulatorOpenChange}
+            simulator={props.simulator}
+            overallGpa={overallGpa}
+            sortedSemesters={browser.sortedSemesters}
+            onCreditCapChange={props.onBinaryCreditCapChange}
+            onApply={props.onApplyBinary}
+          />
         </>
       )}
 
@@ -162,7 +172,7 @@ export function DashboardScreen(props: DashboardScreenProps) {
           const bodyId = `year_body_${group.year}`;
 
           return (
-            <div key={group.year} className={cn("rounded-3xl border border-line", TONE_BG[tone])}>
+            <div key={group.year} className={cn("rounded-3xl border", TONE_BORDER[tone], TONE_BG[tone])}>
               <button
                 type="button"
                 onClick={() => browser.toggleYear(group.year)}

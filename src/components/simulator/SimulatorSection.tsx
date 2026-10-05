@@ -1,18 +1,16 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Drawer } from "vaul";
-import { Check, ChevronsUpDown, Eraser, GripVertical, Minus, Sparkles, X } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronsUpDown, Eraser, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/input";
 import { Checkbox, CheckboxField } from "@/components/ui/toggle";
-import { Badge, Banner } from "@/components/ui/surface";
+import { Badge, Banner, Card } from "@/components/ui/surface";
 import { Chevron, Collapse } from "@/components/ui/collapse";
-import { TONE_BG } from "@/components/semesters/SemesterCard";
+import { TONE_BG, TONE_BORDER } from "@/components/semesters/SemesterCard";
 import { cn } from "@/lib/utils";
 import { deltaTone, formatDelta, formatNumber, yearTone } from "@/lib/format";
 import { seasonLabel, t } from "@/lib/i18n";
 import { formatGpa } from "@/calculations";
 import { BINARY_SORT_MODES, type useSimulator } from "@/hooks/useSimulator";
-import { useIsDesktop } from "@/hooks/useMediaQuery";
 import type { Semester } from "@/types";
 
 type Simulator = ReturnType<typeof useSimulator>;
@@ -59,7 +57,7 @@ function SimulatorBody({ simulator, overallGpa, sortedSemesters, onCreditCapChan
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
         <Tile label={t.simulator.currentGpa}>{formatGpa(overallGpa)}</Tile>
         <Tile
           label={t.simulator.simulatedGpa}
@@ -128,7 +126,7 @@ function SimulatorBody({ simulator, overallGpa, sortedSemesters, onCreditCapChan
                 <X /> {t.simulator.clearAll}
               </Button>
             </div>
-            <div className="mt-2 grid gap-1 sm:grid-cols-2">
+            <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
               {sortedSemesters.map((semester) => (
                 <CheckboxField
                   key={semester.id}
@@ -168,13 +166,14 @@ function SimulatorBody({ simulator, overallGpa, sortedSemesters, onCreditCapChan
           <ul className="flex flex-col gap-1.5">
             {simulator.visibleCourses.map((course, index) => {
               const isSelected = simulator.selectedByKey[course.key] ?? false;
+              const tone = yearTone(course.academicYear);
               return (
                 <li
                   key={course.key}
                   className={cn(
-                    "stagger flex items-center gap-3 rounded-2xl border p-3",
-                    isSelected ? "border-primary/40" : "border-line",
-                    TONE_BG[yearTone(course.academicYear)]
+                    "stagger flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border p-3",
+                    isSelected ? "border-primary/40" : TONE_BORDER[tone],
+                    TONE_BG[tone]
                   )}
                   style={{ "--index": index } as React.CSSProperties}
                 >
@@ -183,21 +182,21 @@ function SimulatorBody({ simulator, overallGpa, sortedSemesters, onCreditCapChan
                     onCheckedChange={(checked) => simulator.toggleSelected(course.key, checked === true)}
                     aria-label={t.simulator.simulateAria(course.courseName)}
                   />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink-strong">{course.courseName}</p>
+                  <div className="min-w-[9rem] flex-1">
+                    <p className="text-sm font-medium text-ink-strong">{course.courseName}</p>
                     <p className="tnum mt-1 text-2xs text-ink-faint">
                       {t.semesters.yearLabel(course.academicYear)} · {course.semesterNumber} ·{" "}
                       {seasonLabel(course.season)}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <Badge variant="outline" className="tnum">
                       {course.grade}
                     </Badge>
-                    <Badge className="tnum">{formatNumber(course.credits)}</Badge>
-                    <span className="tnum hidden w-16 text-end text-xs text-ink-muted sm:block">
-                      {formatGpa(course.soloGpa)}
-                    </span>
+                    <Badge className="tnum">{t.semesters.credits(formatNumber(course.credits))}</Badge>
+                    <Badge variant="outline" className="tnum">
+                      {t.simulator.ifOnlyThis} {formatGpa(course.soloGpa)}
+                    </Badge>
                     <Delta value={course.soloDelta} />
                   </div>
                 </li>
@@ -236,163 +235,42 @@ function SimulatorBody({ simulator, overallGpa, sortedSemesters, onCreditCapChan
   );
 }
 
-interface SimulatorPanelProps extends SimulatorBodyProps {
-  mode: "closed" | "open" | "tab";
-  onModeChange: (mode: "closed" | "open" | "tab") => void;
+interface SimulatorSectionProps extends SimulatorBodyProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
-export function SimulatorPanel({ mode, onModeChange, ...bodyProps }: SimulatorPanelProps) {
-  const isDesktop = useIsDesktop();
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  const dragOffsetRef = useRef({ x: 0, y: 0 });
-  const isDraggingRef = useRef(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (mode !== "open") return;
-
-    // Escape minimises rather than closes so an in-progress selection is not lost.
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onModeChange("tab");
-    }
-
-    function handleResize() {
-      setPosition((prev) => (prev ? clamp(prev.x, prev.y) : prev));
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", handleResize);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [mode, onModeChange]);
-
-  function clamp(x: number, y: number) {
-    const panel = panelRef.current;
-    const width = panel?.offsetWidth ?? 560;
-    const height = panel?.offsetHeight ?? 400;
-    return {
-      x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - width - 8)),
-      y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - height - 8))
-    };
-  }
-
-  function handleDragStart(event: ReactPointerEvent<HTMLDivElement>) {
-    if ((event.target as HTMLElement).closest("button")) return;
-
-    const panel = panelRef.current;
-    if (!panel) return;
-
-    const rect = panel.getBoundingClientRect();
-    dragOffsetRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-
-    // Pin the current geometry so the CSS end/bottom anchoring stops fighting left/top.
-    panel.style.left = `${rect.left}px`;
-    panel.style.top = `${rect.top}px`;
-    panel.style.right = "auto";
-    panel.style.bottom = "auto";
-
-    event.currentTarget.setPointerCapture(event.pointerId);
-    isDraggingRef.current = true;
-    setIsDragging(true);
-  }
-
-  // Writes straight to the DOM during the drag; committing to state per pointermove
-  // re-renders the whole simulator list and makes it stutter.
-  function handleDragMove(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!isDraggingRef.current) return;
-
-    const panel = panelRef.current;
-    if (!panel) return;
-
-    const offset = dragOffsetRef.current;
-    const next = clamp(event.clientX - offset.x, event.clientY - offset.y);
-    panel.style.left = `${next.x}px`;
-    panel.style.top = `${next.y}px`;
-  }
-
-  function handleDragEnd(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!isDraggingRef.current) return;
-
-    isDraggingRef.current = false;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-
-    const panel = panelRef.current;
-    if (panel) {
-      setPosition({ x: parseFloat(panel.style.left) || 0, y: parseFloat(panel.style.top) || 0 });
-    }
-    setIsDragging(false);
-  }
-
-  if (mode === "tab") {
-    return (
-      <Button
-        variant="primary"
-        size="sm"
-        className="fixed bottom-6 end-6 z-40 shadow-float"
-        onClick={() => onModeChange("open")}
-      >
-        <Sparkles /> {t.simulator.title}
-      </Button>
-    );
-  }
-
-  if (mode !== "open") return null;
-
-  if (!isDesktop) {
-    return (
-      <Drawer.Root open onOpenChange={(open) => !open && onModeChange("closed")} repositionInputs={false}>
-        <Drawer.Portal>
-          <Drawer.Overlay className="fixed inset-0 z-40 bg-black/45" />
-          <Drawer.Content className="pb-safe fixed inset-x-0 bottom-0 z-50 flex max-h-[92dvh] flex-col rounded-t-sheet border-t border-line bg-surface outline-none">
-            <div className="mx-auto mt-3 h-1.5 w-11 shrink-0 rounded-full bg-line-strong" aria-hidden="true" />
-            <Drawer.Title className="px-5 pb-3 pt-4 text-lg text-ink-strong">{t.simulator.title}</Drawer.Title>
-            <div className="scroll-region min-h-0 flex-1 px-5 pb-5">
-              <SimulatorBody {...bodyProps} />
-            </div>
-          </Drawer.Content>
-        </Drawer.Portal>
-      </Drawer.Root>
-    );
-  }
+export function SimulatorSection({ open, onOpenChange, ...bodyProps }: SimulatorSectionProps) {
+  const bodyId = "simulator_body";
 
   return (
-    <div
-      ref={panelRef}
-      role="dialog"
-      aria-label={t.simulator.title}
-      className={cn(
-        "fixed bottom-6 end-6 z-40 flex max-h-[80dvh] w-[min(40rem,calc(100vw-3rem))] flex-col",
-        "animate-enter rounded-3xl border border-line bg-surface shadow-float",
-        isDragging && "[&_*]:pointer-events-none"
-      )}
-      style={position ? { left: `${position.x}px`, top: `${position.y}px`, right: "auto", bottom: "auto" } : undefined}
-    >
-      <div
-        onPointerDown={handleDragStart}
-        onPointerMove={handleDragMove}
-        onPointerUp={handleDragEnd}
-        onPointerCancel={handleDragEnd}
-        className={cn(
-          "flex shrink-0 items-center gap-2 rounded-t-3xl border-b border-line px-4 py-3",
-          isDragging ? "cursor-grabbing" : "cursor-grab"
-        )}
-      >
-        <GripVertical className="size-4 shrink-0 text-ink-faint" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink-strong">{t.simulator.title}</span>
-        <Button variant="ghost" size="icon-sm" onClick={() => onModeChange("tab")} aria-label={t.simulator.hide}>
-          <Minus />
-        </Button>
-        <Button variant="ghost" size="icon-sm" onClick={() => onModeChange("closed")} aria-label={t.simulator.close}>
-          <X />
-        </Button>
-      </div>
+    <Card className="overflow-hidden">
+      <h3>
+        <button
+          type="button"
+          onClick={() => onOpenChange(!open)}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          className="press flex w-full items-start gap-3 px-5 py-5 text-start sm:px-6"
+        >
+          <Chevron open={open} className="mt-1.5" />
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2 text-lg text-ink-strong">
+              <Sparkles className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              {t.simulator.title}
+            </span>
+            <span className="mt-1 block max-w-prose text-sm leading-relaxed text-ink-muted">
+              {t.simulator.description}
+            </span>
+          </span>
+        </button>
+      </h3>
 
-      <div className="scroll-region min-h-0 flex-1 p-4">
-        <SimulatorBody {...bodyProps} />
-      </div>
-    </div>
+      <Collapse open={open} id={bodyId}>
+        <div className="border-t border-line p-4 sm:p-6">
+          <SimulatorBody {...bodyProps} />
+        </div>
+      </Collapse>
+    </Card>
   );
 }

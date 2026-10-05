@@ -22,6 +22,15 @@ export const TONE_BG: Record<number, string> = {
   6: "bg-tone-6"
 };
 
+export const TONE_BORDER: Record<number, string> = {
+  1: "border-tone-1-line",
+  2: "border-tone-2-line",
+  3: "border-tone-3-line",
+  4: "border-tone-4-line",
+  5: "border-tone-5-line",
+  6: "border-tone-6-line"
+};
+
 interface SemesterCardProps {
   semester: Semester;
   tone: number;
@@ -80,7 +89,7 @@ export function SemesterCard({
   const bodyId = `semester_body_${semester.id}`;
 
   return (
-    <article ref={cardRef} className={cn("overflow-hidden rounded-3xl border border-line", TONE_BG[tone])}>
+    <article ref={cardRef} className={cn("overflow-hidden rounded-3xl border", TONE_BORDER[tone], TONE_BG[tone])}>
       <div className="flex flex-col gap-2 p-2 sm:flex-row sm:items-center">
         <button
           type="button"
